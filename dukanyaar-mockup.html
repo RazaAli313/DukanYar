@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dukaan AI - Voice POS Prototype</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.15); opacity: 0.4; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+    .mic-pulse { animation: pulse-ring 1.5s infinite ease-in-out; }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 flex justify-center items-center min-h-screen p-2 font-sans antialiased select-none">
+
+  <!-- Mobile Frame -->
+  <div class="w-full max-w-sm h-[780px] bg-slate-950 border-4 border-slate-800 rounded-3xl flex flex-col justify-between overflow-hidden shadow-2xl relative">
+    
+    <!-- Top Header -->
+    <header class="bg-slate-900 border-b border-slate-800 p-4 shrink-0">
+      <div class="flex justify-between items-center">
+        <div>
+          <h1 class="font-bold text-base text-emerald-400">🏪 Bismillah Store</h1>
+          <p class="text-xs text-slate-400">AI Active • Urdu Mode</p>
+        </div>
+        <div class="flex items-center gap-2 bg-slate-800 px-2.5 py-1 rounded-full border border-slate-700">
+          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+          <span class="text-xs font-semibold text-slate-300">Live</span>
+        </div>
+      </div>
+      
+      <!-- Metrics Bar -->
+      <div class="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-slate-800/80 text-center">
+        <div class="bg-slate-800/50 p-1.5 rounded-lg">
+          <div class="text-[10px] text-slate-400">Today's Total</div>
+          <div class="text-xs font-bold text-white">Rs 14,250</div>
+        </div>
+        <div class="bg-slate-800/50 p-1.5 rounded-lg">
+          <div class="text-[10px] text-emerald-400">Cash</div>
+          <div class="text-xs font-bold text-emerald-300">Rs 11,200</div>
+        </div>
+        <div class="bg-slate-800/50 p-1.5 rounded-lg">
+          <div class="text-[10px] text-rose-400">Udhaar</div>
+          <div class="text-xs font-bold text-rose-300">Rs 3,050</div>
+        </div>
+      </div>
+    </header>
+
+    <!-- TAB 1: CASH COUNTER (HOME) -->
+    <section id="tab-home" class="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
+      <!-- Voice Simulation Banner -->
+      <div id="voice-box" class="hidden bg-emerald-950/40 border border-emerald-500/50 p-3.5 rounded-2xl">
+        <div class="flex items-center justify-between text-xs text-emerald-300 mb-1">
+          <span class="flex items-center gap-1.5 font-medium">
+            <span class="animate-pulse">🎙️</span> Bol rahe hain...
+          </span>
+          <span id="countdown" class="text-[10px] bg-emerald-900/60 px-1.5 py-0.5 rounded text-emerald-200">Saving in 3s</span>
+        </div>
+        <p class="text-sm font-medium text-white italic">"Ali ko 2 Coke aur 1 Chips 450 udhaar di"</p>
+        
+        <div class="mt-2.5 pt-2 border-t border-emerald-800/50 flex justify-between items-center text-xs">
+          <div>
+            <p class="text-slate-300">Customer: <b class="text-white">Ali Bhai</b></p>
+            <p class="text-rose-400 font-bold">+Rs 450 Udhaar</p>
+          </div>
+          <button onclick="cancelVoiceAction()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1 rounded-lg text-xs font-semibold border border-slate-600">
+            Ghalat Hai (Cancel)
+          </button>
+        </div>
+      </div>
+
+      <!-- Feed Label -->
+      <div class="flex justify-between items-center text-xs text-slate-400 font-semibold uppercase tracking-wider px-1">
+        <span>Taza Entries (Recent)</span>
+        <span class="text-emerald-400 cursor-pointer" onclick="alert('Full transaction log')">View All</span>
+      </div>
+
+      <!-- Transaction Feed -->
+      <div id="feed-list" class="flex flex-col gap-2">
+        <div class="bg-slate-900 p-3 rounded-xl border border-slate-800 flex justify-between items-center">
+          <div>
+            <div class="font-medium text-sm text-slate-200">2x Milk Pack 1L</div>
+            <div class="text-xs text-slate-400">12:41 PM • Cash Sale</div>
+          </div>
+          <div class="text-right">
+            <div class="text-sm font-bold text-emerald-400">+ Rs 580</div>
+            <div class="text-[10px] text-slate-500">Stock: 14 left</div>
+          </div>
+        </div>
+
+        <div class="bg-slate-900 p-3 rounded-xl border border-slate-800 flex justify-between items-center">
+          <div>
+            <div class="font-medium text-sm text-slate-200">Tariq Master Sab</div>
+            <div class="text-xs text-rose-400">12:15 PM • Udhaar Added</div>
+          </div>
+          <div class="text-right">
+            <div class="text-sm font-bold text-rose-400">+ Rs 1,100</div>
+            <div class="text-[10px] text-slate-400">Bal: Rs 4,800</div>
+          </div>
+        </div>
+
+        <div class="bg-amber-950/20 border border-amber-500/30 p-2.5 rounded-xl flex items-center gap-2.5">
+          <span class="text-base">⚠️</span>
+          <div class="text-xs text-amber-200">
+            <b class="text-white">Dalda Ghee 1kg</b> sirf 2 dabbe reh gaye hain.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 2: UDHAAR KHATA -->
+    <section id="tab-khata" class="flex-1 overflow-y-auto p-4 hidden flex-col gap-3">
+      <div class="bg-slate-900 border border-slate-800 p-3 rounded-xl flex justify-between items-center">
+        <div>
+          <p class="text-xs text-slate-400">Kul Udhaar (Total Ledger)</p>
+          <p class="text-lg font-bold text-rose-400">Rs 48,200</p>
+        </div>
+        <div class="text-xs bg-rose-950/60 border border-rose-800/50 text-rose-300 px-2 py-1 rounded-lg">
+          14 Log
+        </div>
+      </div>
+
+      <div class="text-xs text-slate-400 font-semibold uppercase px-1">Customer Balances</div>
+
+      <!-- Customer Cards -->
+      <div class="flex flex-col gap-2">
+        <div class="bg-slate-900 border border-slate-800 p-3 rounded-xl">
+          <div class="flex justify-between items-start">
+            <div>
+              <div class="font-semibold text-white">Ali Bhai (Tailor)</div>
+              <div class="text-xs text-slate-400">Akhri Entry: 10 min pehle</div>
+            </div>
+            <div class="text-right">
+              <div class="text-sm font-bold text-rose-400">Rs 1,650</div>
+              <div class="text-[10px] text-slate-400">3 Bills Unpaid</div>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-2 mt-2.5 pt-2 border-t border-slate-800">
+            <button onclick="recordWasooli('Ali Bhai', 1650)" class="bg-emerald-950/50 border border-emerald-700/50 text-emerald-300 text-xs py-1 rounded font-medium hover:bg-emerald-900">
+              🟢 Wasooli (Paid)
+            </button>
+            <button onclick="alert('WhatsApp reminder sent to Ali Bhai!')" class="bg-slate-800 border border-slate-700 text-slate-300 text-xs py-1 rounded font-medium hover:bg-slate-700">
+              💬 Remind
+            </button>
+          </div>
+        </div>
+
+        <div class="bg-slate-900 border border-slate-800 p-3 rounded-xl">
+          <div class="flex justify-between items-start">
+            <div>
+              <div class="font-semibold text-white">Tariq Master Sab</div>
+              <div class="text-xs text-slate-400">Akhri Entry: Aaj 12:15 PM</div>
+            </div>
+            <div class="text-right">
+              <div class="text-sm font-bold text-rose-400">Rs 4,800</div>
+              <div class="text-[10px] text-slate-400">5 Bills Unpaid</div>
+            </div>
+          </div>
+          <div class="grid grid-cols-2 gap-2 mt-2.5 pt-2 border-t border-slate-800">
+            <button onclick="recordWasooli('Tariq Master Sab', 4800)" class="bg-emerald-950/50 border border-emerald-700/50 text-emerald-300 text-xs py-1 rounded font-medium hover:bg-emerald-900">
+              🟢 Wasooli (Paid)
+            </button>
+            <button onclick="alert('WhatsApp reminder sent to Tariq Sab!')" class="bg-slate-800 border border-slate-700 text-slate-300 text-xs py-1 rounded font-medium hover:bg-slate-700">
+              💬 Remind
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: STOCK -->
+    <section id="tab-stock" class="flex-1 overflow-y-auto p-4 hidden flex-col gap-3">
+      <div class="text-xs text-slate-400 font-semibold uppercase px-1">Inventory Checklist</div>
+      <div class="flex flex-col gap-2">
+        <div class="bg-slate-900 border border-slate-800 p-3 rounded-xl flex justify-between items-center">
+          <div>
+            <div class="font-semibold text-white">Coca Cola 500ml</div>
+            <div class="text-xs text-slate-400">Cost: Rs 90 | Sell: Rs 100</div>
+          </div>
+          <div class="text-right">
+            <div class="text-sm font-bold text-emerald-400">28 Bottles</div>
+            <div class="text-[10px] text-slate-500">In Stock</div>
+          </div>
+        </div>
+
+        <div class="bg-slate-900 border border-slate-800 p-3 rounded-xl flex justify-between items-center">
+          <div>
+            <div class="font-semibold text-white">Lays Masala 50g</div>
+            <div class="text-xs text-slate-400">Cost: Rs 42 | Sell: Rs 50</div>
+          </div>
+          <div class="text-right">
+            <div class="text-sm font-bold text-emerald-400">19 Packets</div>
+            <div class="text-[10px] text-slate-500">In Stock</div>
+          </div>
+        </div>
+
+        <div class="bg-rose-950/20 border border-rose-600/40 p-3 rounded-xl flex justify-between items-center">
+          <div>
+            <div class="font-semibold text-rose-200">Dalda Ghee 1kg</div>
+            <div class="text-xs text-rose-400">Low Stock Alert</div>
+          </div>
+          <div class="text-right">
+            <div class="text-sm font-bold text-rose-400">2 Left</div>
+            <button onclick="alert('Order request drafted!')" class="text-[10px] bg-rose-900 text-rose-200 px-2 py-0.5 rounded mt-1">Reorder</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Floating Mic Button Area -->
+    <div class="relative flex justify-center -mb-8 z-10">
+      <button id="mic-button" onclick="triggerVoiceDemo()" class="relative bg-emerald-500 hover:bg-emerald-400 text-slate-950 p-5 rounded-full shadow-lg shadow-emerald-500/30 flex items-center justify-center transition active:scale-95">
+        <span id="mic-ping" class="hidden absolute inset-0 rounded-full bg-emerald-400 mic-pulse"></span>
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 relative z-10 fill-current" viewBox="0 0 24 24">
+          <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+          <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Bottom Navigation Bar -->
+    <nav class="bg-slate-900 border-t border-slate-800 grid grid-cols-3 pt-4 pb-3 px-2 z-0">
+      <button onclick="switchTab('home')" id="btn-home" class="flex flex-col items-center gap-1 text-emerald-400">
+        <span class="text-lg">🏪</span>
+        <span class="text-[11px] font-semibold">Counter</span>
+      </button>
+      <div class="text-center pt-3">
+        <span class="text-[10px] text-slate-400 block tracking-tight">Tap to Talk</span>
+      </div>
+      <button onclick="switchTab('khata')" id="btn-khata" class="flex flex-col items-center gap-1 text-slate-400">
+        <span class="text-lg">📒</span>
+        <span class="text-[11px] font-semibold">Khata</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- Interactive Logic -->
+  <script>
+    let timer = null;
+
+    function switchTab(tab) {
+      document.getElementById('tab-home').classList.add('hidden');
+      document.getElementById('tab-khata').classList.add('hidden');
+      document.getElementById('tab-stock').classList.add('hidden');
+
+      document.getElementById('btn-home').className = "flex flex-col items-center gap-1 text-slate-400";
+      document.getElementById('btn-khata').className = "flex flex-col items-center gap-1 text-slate-400";
+
+      if (tab === 'home') {
+        document.getElementById('tab-home').classList.remove('hidden');
+        document.getElementById('btn-home').className = "flex flex-col items-center gap-1 text-emerald-400";
+      } else if (tab === 'khata') {
+        document.getElementById('tab-khata').classList.remove('hidden');
+        document.getElementById('btn-khata').className = "flex flex-col items-center gap-1 text-emerald-400";
+      } else if (tab === 'stock') {
+        document.getElementById('tab-stock').classList.remove('hidden');
+      }
+    }
+
+    function triggerVoiceDemo() {
+      switchTab('home');
+      const box = document.getElementById('voice-box');
+      const ping = document.getElementById('mic-ping');
+      const countdown = document.getElementById('countdown');
+      
+      box.classList.remove('hidden');
+      ping.classList.remove('hidden');
+
+      let seconds = 3;
+      countdown.innerText = `Saving in ${seconds}s`;
+
+      clearInterval(timer);
+      timer = setInterval(() => {
+        seconds--;
+        if (seconds > 0) {
+          countdown.innerText = `Saving in ${seconds}s`;
+        } else {
+          clearInterval(timer);
+          box.classList.add('hidden');
+          ping.classList.add('hidden');
+          addNewFeedEntry();
+        }
+      }, 1000);
+    }
+
+    function cancelVoiceAction() {
+      clearInterval(timer);
+      document.getElementById('voice-box').classList.add('hidden');
+      document.getElementById('mic-ping').classList.add('hidden');
+    }
+
+    function addNewFeedEntry() {
+      const feed = document.getElementById('feed-list');
+      const newCard = document.createElement('div');
+      newCard.className = "bg-slate-900 p-3 rounded-xl border border-rose-900/50 flex justify-between items-center transition duration-500 animate-pulse";
+      newCard.innerHTML = `
+        <div>
+          <div class="font-semibold text-sm text-white">Ali Bhai (2x Coke, 1x Chips)</div>
+          <div class="text-xs text-rose-400">Just Now • Udhaar Recorded</div>
+        </div>
+        <div class="text-right">
+          <div class="text-sm font-bold text-rose-400">+ Rs 450</div>
+          <div class="text-[10px] text-slate-400">Bal: Rs 1,650</div>
+        </div>
+      `;
+      feed.insertBefore(newCard, feed.firstChild);
+      setTimeout(() => newCard.classList.remove('animate-pulse'), 1200);
+    }
+
+    function recordWasooli(name, amount) {
+      alert(`Wasooli Entry Recorded: Rs ${amount} received in Cash from ${name}!`);
+    }
+  </script>
+</body>
+</html>
