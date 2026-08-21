@@ -31,7 +31,30 @@ docs/
   text-model/          TEXT   — Dev 1: text input ⇄ model (conversational)
   voice/               VOICE  — Dev 2: voice input ⇄ model (STT + TTS)
   auth/                AUTH   — Dev 3: authentication, RBAC, tenancy
+  tool-calling/        TOOL   — Phase 2: tool registry + orchestration + confirm/undo
+  sale/                SALE   — Phase 3: sales + inventory (hero flow)
+  khata/               KHATA  — Phase 3: udhaar / credit ledger (khata# + CNIC)
+  expense/             EXP    — Phase 3: expense tracking
+  reporting/           RPT    — Phase 3: summaries (sales/profit, udhaar, low-stock)
+  admin/               ADMIN  — Phase 4: admin console (second role)
+  catalog/             CATLG  — Roadmap: voice catalog building + proactive alerts
 ```
+
+### Full epic index
+
+| Phase | Epic | Prefix | Folder | Tickets |
+| :---- | :---- | :---- | :---- | :---- |
+| 1 | Foundation | FND | `foundation/` | FND-1..3 |
+| 1 | Text ⇄ Model | TEXT | `text-model/` | TEXT-1..4 |
+| 1 | Voice ⇄ Model | VOICE | `voice/` | VOICE-1..4 |
+| 1 | Auth, RBAC & Tenancy | AUTH | `auth/` | AUTH-1..4 |
+| 2 | Tool-Calling & Orchestration | TOOL | `tool-calling/` | TOOL-1..4 |
+| 3 | Sales & Inventory | SALE | `sale/` | SALE-1..4 |
+| 3 | Udhaar / Credit Ledger | KHATA | `khata/` | KHATA-1..4 |
+| 3 | Expense Tracking | EXP | `expense/` | EXP-1..3 |
+| 3 | Reporting & Summaries | RPT | `reporting/` | RPT-1..4 |
+| 4 | Admin Console | ADMIN | `admin/` | ADMIN-1..3 |
+| Roadmap | Voice Catalog & Alerts | CATLG | `catalog/` | CATLG-1..3 |
 
 ---
 
