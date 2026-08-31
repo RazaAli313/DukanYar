@@ -84,38 +84,45 @@ cd frontend && npm install && cp .env.example .env.local && npm run dev
 
 ---
 
-## NEXT: TEXT-1 — Chat input UI (not started)
+## DONE: TEXT-1 — Chat input UI
 
-UI only, built against a **stubbed** reply (per `index.md` build order). React state
-only — no persistence (that's TEXT-3).
+Frontend-only chat screen at `/`. All state is React-local, no persistence.
 
-Acceptance criteria (`docs/text-model/TEXT-1.md`):
-- Submit a typed message → appears as a "user" bubble; input clears, ready for next.
-- Assistant reply arrives → appears as an "assistant" bubble beneath it.
-- While waiting → visible pending indicator until reply or error.
-- Urdu-script message renders right-to-left and stays readable.
+**Files created:**
+```
+frontend/src/lib/types.ts             Message, Sender, MessageStatus types
+frontend/src/lib/rtl.ts               isRtl() per-bubble Arabic-script detection
+frontend/src/lib/chatApi.ts           sendMessage() stub — TEXT-2 swap point
+frontend/src/components/chat/
+  ChatScreen.tsx                      Main view (h-dvh, centered 720px column)
+  ChatThread.tsx                      Scrollable message list + empty state
+  ChatBubble.tsx                      User/assistant bubbles, RTL, timestamps
+  ChatInput.tsx                       <form> Enter-to-send, arrow-up icon button
+  PendingIndicator.tsx                Staggered bouncing dots
+```
 
-### 5 open decisions (were pending when handed off — pick before coding)
+**5 decisions resolved:** frontend stub (`setTimeout` + canned), route `/`, per-message
+RTL auto-detect, dark theme (slate-900 + emerald), Roman-Urdu UI copy.
 
-| # | Question | Recommended default |
-| --- | --- | --- |
-| 1 | Where is the stub reply? | Pure frontend stub (`setTimeout` + canned reply), structured so TEXT-2 swaps in the real API call. No backend yet. |
-| 2 | Route for the chat screen | `/` (home) — app is single-purpose, voice-first |
-| 3 | RTL handling | Per-message auto-detect: if the text contains Arabic-script chars, set that bubble's `dir="rtl"`. Better for code-switching than a whole-app flip. |
-| 4 | Theme | Dark, echoing the mockup (`mockups/dukanyaar-mockup.html`: slate-900 + emerald accents) for later consistency |
-| 5 | UI copy language (placeholder, send button, errors) | Roman-Urdu (e.g. "Apna message likhein…", "Bhejein") |
+`next build` passes clean.
 
-The mockup is a **POS dashboard** prototype, not a chat UI — no direct design
-reference for the chat thread; use it only for palette/tone.
+---
+
+## NEXT: TEXT-2 — Model integration & streaming reply
+
+`POST /conversations/{id}/messages` in FastAPI. LLM call behind `app/services/llm.py`
+(Gemini now / Qwen later, OpenAI-compatible). Streaming reply. Channel-agnostic
+(voice reuses it). Clear error + retry without losing the typed text.
+
+**Swap point:** replace the body of `frontend/src/lib/chatApi.ts` — the component
+layer does NOT change.
+
+*Needs a Gemini API key — https://aistudio.google.com → Get API key (free).*
 
 ---
 
 ## Then, in order
 
-- **TEXT-2** — `POST /conversations/{id}/messages` in FastAPI. LLM call behind
-  `app/services/llm.py` (Gemini now / Qwen later, OpenAI-compatible). Streaming reply.
-  Channel-agnostic (voice reuses it). Clear error + retry without losing the typed text.
-  *Needs a Gemini API key — https://aistudio.google.com → Get API key (free).*
 - **TEXT-3** — persist user + assistant messages to `messages`, reload history in order,
   scope every query by `shop_id`, feed recent turns as context to the LLM.
   *Needs Sheheryar's real `db.py` (Supabase client) + tables.*

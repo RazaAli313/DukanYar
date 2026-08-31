@@ -6,3 +6,6 @@ Thumbs.db
 
 # Scratch
 _*.pdf
+
+# Qoder IDE
+.qoder/

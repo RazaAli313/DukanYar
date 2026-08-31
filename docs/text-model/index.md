@@ -23,7 +23,7 @@ Hackathon 2026 (use Qwen models).
 
 | ID | Name | Status | Build Engineer | QA | DM |
 | :---- | :---- | :---- | :---- | :---- | :---- |
-| TEXT-1 | Chat input UI | To Be Done | TBD | TBD | TBD |
+| TEXT-1 | Chat input UI | Done | Usman | — | — |
 | TEXT-2 | Model integration & streaming reply | To Be Done | TBD | TBD | TBD |
 | TEXT-3 | Conversation persistence & history | To Be Done | TBD | TBD | TBD |
 | TEXT-4 | Urdu / Roman / English handling & assistant persona | To Be Done | TBD | TBD | TBD |
