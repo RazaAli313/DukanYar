@@ -47,13 +47,30 @@ export function ChatThread({ messages, onRetry }: Props) {
   return (
     <div className="flex-1 overflow-y-auto px-4 py-4">
       <div className="flex flex-col gap-3">
-        {messages.map((msg) => {
+        {messages.map((msg, idx) => {
           const isUser = msg.sender === "user";
+
+          // For user bubbles: retry re-sends this user message.
+          let retryHandler: (() => void) | undefined;
+          if (isUser) {
+            retryHandler = () => onRetry(msg);
+          } else if (msg.status === "error") {
+            // For assistant error bubbles: find the most recent user message
+            // before this one and retry that.
+            for (let i = idx - 1; i >= 0; i--) {
+              if (messages[i].sender === "user") {
+                const userMsg = messages[i];
+                retryHandler = () => onRetry(userMsg);
+                break;
+              }
+            }
+          }
+
           return (
             <ChatBubble
               key={msg.id}
               message={msg}
-              onRetry={isUser ? () => onRetry(msg) : undefined}
+              onRetry={retryHandler}
             />
           );
         })}

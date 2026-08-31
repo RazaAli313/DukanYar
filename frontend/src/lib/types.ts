@@ -1,5 +1,5 @@
 export type Sender = "user" | "assistant";
-export type MessageStatus = "pending" | "complete" | "error";
+export type MessageStatus = "pending" | "streaming" | "complete" | "error";
 
 export interface Message {
   id: string;

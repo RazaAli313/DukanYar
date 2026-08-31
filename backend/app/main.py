@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.routers import conversations
 
 app = FastAPI(title=f"{settings.app_name} API")
 
@@ -20,4 +21,4 @@ def health() -> dict[str, str]:
 
 
 # Feature routers are mounted here as tickets land:
-#   TEXT-2  -> app.routers.conversations
+app.include_router(conversations.router, prefix="/conversations")

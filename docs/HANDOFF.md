@@ -2,7 +2,7 @@
 
 **Owner:** Usman (Muhammad Usman Tariq)
 **Branch:** `feat/text-voice-module` → PR against `develop` (Raza reviews & merges)
-**Last updated:** 2026-08-31
+**Last updated:** 2026-09-01
 **Module scope:** the TEXT pillar (TEXT-1..4) and the VOICE pillar (VOICE-1..4).
 Tickets: `docs/text-model/`, `docs/voice/`. Read each ticket's `.md` +
 `user-stories.md` + `index.md` before starting it.
@@ -108,24 +108,48 @@ RTL auto-detect, dark theme (slate-900 + emerald), Roman-Urdu UI copy.
 
 ---
 
-## NEXT: TEXT-2 — Model integration & streaming reply
+## DONE: TEXT-2 — Model integration & streaming reply
 
-`POST /conversations/{id}/messages` in FastAPI. LLM call behind `app/services/llm.py`
-(Gemini now / Qwen later, OpenAI-compatible). Streaming reply. Channel-agnostic
-(voice reuses it). Clear error + retry without losing the typed text.
+Stateless streaming endpoint (no DB yet — frontend sends recent turns in the body).
 
-**Swap point:** replace the body of `frontend/src/lib/chatApi.ts` — the component
-layer does NOT change.
+**Files:**
+```
+backend/app/services/llm.py           stream_reply() — openai.AsyncOpenAI vs the
+                                      Gemini OpenAI-compatible endpoint; thinking
+                                      minimized (reasoning_effort="minimal");
+                                      provider swap = config only
+backend/app/routers/conversations.py  POST /conversations/{id}/messages — SSE
+                                      (named events: delta / done / error)
+backend/app/main.py                   mounts the conversations router
+frontend/src/lib/chatApi.ts           real fetch + SSE parser (buffered), 30s timeout,
+                                      onDelta/onComplete callbacks
+frontend/src/lib/types.ts             MessageStatus += "streaming"
+frontend/src/components/chat/ChatScreen.tsx   streams reply, per-tab conversationId,
+                                      id-based retry (no dup user bubble)
+frontend/src/components/chat/ChatThread.tsx   retry button on assistant error bubble
+```
 
-*Needs a Gemini API key — https://aistudio.google.com → Get API key (free).*
+**Config (`backend/.env`, gitignored):**
+```
+LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+LLM_API_KEY=<Gemini key from aistudio.google.com>
+LLM_MODEL=gemini-3.6-flash      # gemini-2.0-flash was retired (404)
+```
+
+Tested: streaming, Roman-Urdu, multi-turn context, Urdu RTL, error + retry.
+`next build` + backend import clean.
 
 ---
 
+## NEXT: TEXT-3 — Conversation persistence & history
+
+Persist user + assistant messages to the `messages` table, reload history in order,
+scope every query by `shop_id`, feed recent turns as context to the LLM.
+**Needs Sheheryar's real `db.py` (Supabase client) + the `conversations` / `messages`
+tables.** Until those land, TEXT-3 is blocked — do TEXT-4 first if so.
+
 ## Then, in order
 
-- **TEXT-3** — persist user + assistant messages to `messages`, reload history in order,
-  scope every query by `shop_id`, feed recent turns as context to the LLM.
-  *Needs Sheheryar's real `db.py` (Supabase client) + tables.*
 - **TEXT-4** — system persona ("polite, concise AI shop employee"), Urdu / Roman-Urdu /
   English code-switching, reply in the user's register, ask a short clarifying question
   when input is ambiguous.

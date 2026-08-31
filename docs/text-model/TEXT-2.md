@@ -4,7 +4,7 @@
 | :---- | :---- |
 | Ticket ID | TEXT-2 |
 | Ticket Name | Model integration & streaming reply |
-| Status | To Be Done |
+| Status | Done |
 | Priority | P0 — Blocker |
 | Dependencies | FND-1 (backend), FND-2 (conversations/messages tables) |
 | Estimate | BE: TBD \| FE: TBD |
