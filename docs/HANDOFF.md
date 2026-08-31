@@ -172,21 +172,33 @@ scope every query by `shop_id`, feed recent turns as context to the LLM.
 **Needs Sheheryar's real `db.py` (Supabase client) + the `conversations` / `messages`
 tables.** Until those land, TEXT-3 is blocked — do TEXT-4 first if so.
 
-## Then, in order
+## Then, in order — the VOICE epic (all 4 are DB-independent; do them now, don't wait for TEXT-3)
 
-- **TEXT-4** — system persona ("polite, concise AI shop employee"), Urdu / Roman-Urdu /
-  English code-switching, reply in the user's register, ask a short clarifying question
-  when input is ambiguous.
+Build order per `docs/voice/index.md`: VOICE-1 → (VOICE-2 ∥ VOICE-3) → VOICE-4.
+They all reuse TEXT-2's stateless `POST /conversations/{id}/messages` endpoint.
+
 - **VOICE-1** — push-to-talk mic capture (hold to record, release to send), mic-permission
-  handling, ignore empty/near-empty clips.
-- **VOICE-2** — captured audio → STT (ElevenLabs Scribe / Whisper) → transcript → the
-  **same** `/messages` endpoint tagged `channel=voice`; set `transcription_confidence`;
-  prompt retry on empty / low-confidence.
+  handling, ignore empty/near-empty clips. Pure frontend, no API key needed.
+- **VOICE-2** — captured audio → STT → transcript → the **same** `/messages` endpoint
+  tagged `channel=voice`; set `transcription_confidence`; prompt retry on empty /
+  low-confidence.
+  **Provider: Speechmatics** (user has an API key). Strong on accented / noisy speech
+  and Urdu-English code-switching. Groq's `whisper-large-v3` (same key as the LLM) is a
+  fallback.
 - **VOICE-3** — assistant reply text → TTS **behind an adapter interface**
-  (`app/services/voice.py`), so the provider can be swapped without touching capture or
-  STT. Always show the reply as text too; degrade gracefully if TTS fails.
+  (`backend/app/services/voice.py`), so the provider can be swapped without touching
+  capture or STT. Always show the reply as text too; degrade gracefully if TTS fails.
+  **Provider: `edge-tts`** (`uv add edge-tts`) — free, no key / no card / no signup,
+  gives the real Pakistani Urdu neural voices `ur-PK-UzmaNeural` (F) / `ur-PK-AsadNeural`
+  (M). Unofficial (uses Edge's endpoint) — the adapter lets us swap to official Azure
+  TTS (same voices, needs a card) later. Speechmatics has NO usable Urdu TTS.
 - **VOICE-4** — full speak→hear loop; voice + text share one conversation thread;
   a mis-transcription can be fixed by typing without restarting.
+
+## Blocked until Sheheryar's DB lands
+
+- **TEXT-3** — persistence (see above). Not blocking anything else — do it whenever the
+  `conversations` / `messages` tables + `backend/app/db.py` (real Supabase client) exist.
 
 ---
 
