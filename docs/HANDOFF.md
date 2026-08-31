@@ -2,7 +2,7 @@
 
 **Owner:** Usman (Muhammad Usman Tariq)
 **Branch:** `feat/text-voice-module` → PR against `develop` (Raza reviews & merges)
-**Last updated:** 2026-09-01
+**Last updated:** 2026-09-01 (TEXT-1, TEXT-2, TEXT-4 done; TEXT-3 blocked on DB)
 **Module scope:** the TEXT pillar (TEXT-1..4) and the VOICE pillar (VOICE-1..4).
 Tickets: `docs/text-model/`, `docs/voice/`. Read each ticket's `.md` +
 `user-stories.md` + `index.md` before starting it.
@@ -114,10 +114,9 @@ Stateless streaming endpoint (no DB yet — frontend sends recent turns in the b
 
 **Files:**
 ```
-backend/app/services/llm.py           stream_reply() — openai.AsyncOpenAI vs the
-                                      Gemini OpenAI-compatible endpoint; thinking
-                                      minimized (reasoning_effort="minimal");
-                                      provider swap = config only
+backend/app/services/llm.py           stream_reply() — openai.AsyncOpenAI vs any
+                                      OpenAI-compatible endpoint; provider swap
+                                      = config only. (TEXT-4 prepends SYSTEM_PROMPT here.)
 backend/app/routers/conversations.py  POST /conversations/{id}/messages — SSE
                                       (named events: delta / done / error)
 backend/app/main.py                   mounts the conversations router
@@ -129,15 +128,40 @@ frontend/src/components/chat/ChatScreen.tsx   streams reply, per-tab conversatio
 frontend/src/components/chat/ChatThread.tsx   retry button on assistant error bubble
 ```
 
-**Config (`backend/.env`, gitignored):**
-```
-LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
-LLM_API_KEY=<Gemini key from aistudio.google.com>
-LLM_MODEL=gemini-3.6-flash      # gemini-2.0-flash was retired (404)
-```
-
 Tested: streaming, Roman-Urdu, multi-turn context, Urdu RTL, error + retry.
 `next build` + backend import clean.
+
+---
+
+## DONE: TEXT-4 — Language handling & assistant persona
+
+System prompt in `backend/app/prompts.py` (`SYSTEM_PROMPT`), prepended in
+`llm.py`. Covers: polite "dukaan ka AI assistant" persona (aap, concise, no
+markdown), reply in the shopkeeper's language/register (Roman-Urdu / Urdu
+script / English / code-switched), ask ONE clarifying question on vague input
+instead of guessing, and — critical for Phase 1 — never fake a save/record
+(no tools yet; only explicit "record kar do" gets a "feature coming soon" line).
+`reasoning_effort` is now config-driven (`LLM_REASONING_EFFORT`, provider-specific).
+
+Tested 8-turn conversation: persona, language switching, no-fake-save, and
+arithmetic all pass. Urdu *script* quality is model-limited (see LLM note below).
+
+---
+
+## LLM provider — current state (2026-09-01)
+
+Google locked new API keys to `gemini-3.6-flash` only (20 requests/day free) —
+**Gemini free tier is unusable** for this. Now on **Groq free tier**:
+```
+LLM_BASE_URL=https://api.groq.com/openai/v1
+LLM_API_KEY=gsk_...            # console.groq.com — free
+LLM_MODEL=openai/gpt-oss-120b  # best free option for Roman-Urdu; qwen3.x-27b was weaker
+LLM_REASONING_EFFORT=none      # Groq: none/low/medium/high (not "minimal")
+```
+Roman-Urdu is coherent; Urdu script still hallucinates on gpt-oss-120b. **Before the
+demo**, switch to Alibaba Model Studio Qwen (`qwen-plus`/`qwen-max`, free tier ~1M
+tokens) — better Urdu + aligns with the hackathon. Swap = 3 `.env` lines, no code.
+Groq also has `whisper-large-v3` (STT) on the same key — useful for VOICE-2.
 
 ---
 

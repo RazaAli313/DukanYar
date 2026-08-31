@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     llm_base_url: str = ""
     llm_api_key: str = ""
     llm_model: str = ""
+    # Provider-specific (Groq/Qwen: "none", Gemini 3: "minimal"); "" omits it
+    llm_reasoning_effort: str = "none"
 
     @property
     def cors_origin_list(self) -> list[str]:
