@@ -1,12 +1,23 @@
 import { isRtl } from "@/lib/rtl";
 import type { Message } from "@/lib/types";
+import type { SpeechStatus } from "@/lib/voice/useReplySpeech";
+import { ReplaySpeechButton } from "@/components/voice/ReplaySpeechButton";
 
 interface Props {
   message: Message;
   onRetry?: () => void;
+  speechStatus?: SpeechStatus;
+  onSpeechPlay?: () => void;
+  onSpeechStop?: () => void;
 }
 
-export function ChatBubble({ message, onRetry }: Props) {
+export function ChatBubble({
+  message,
+  onRetry,
+  speechStatus,
+  onSpeechPlay,
+  onSpeechStop,
+}: Props) {
   const isUser = message.sender === "user";
   const rtl = isRtl(message.text);
 
@@ -42,6 +53,14 @@ export function ChatBubble({ message, onRetry }: Props) {
         >
           Dubara bhejein
         </button>
+      )}
+
+      {speechStatus && onSpeechPlay && onSpeechStop && (
+        <ReplaySpeechButton
+          status={speechStatus}
+          onPlay={onSpeechPlay}
+          onStop={onSpeechStop}
+        />
       )}
     </div>
   );

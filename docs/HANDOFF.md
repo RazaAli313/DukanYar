@@ -2,7 +2,7 @@
 
 **Owner:** Usman (Muhammad Usman Tariq)
 **Branch:** `feat/text-voice-module` → PR against `develop` (Raza reviews & merges)
-**Last updated:** 2026-09-01 (TEXT-1, TEXT-2, TEXT-4, VOICE-1, VOICE-2 done; TEXT-3 blocked on DB)
+**Last updated:** 2026-09-01 (TEXT-1, TEXT-2, TEXT-4, VOICE-1, VOICE-2, VOICE-3 done; TEXT-3 blocked on DB)
 **Module scope:** the TEXT pillar (TEXT-1..4) and the VOICE pillar (VOICE-1..4).
 Tickets: `docs/text-model/`, `docs/voice/`. Read each ticket's `.md` +
 `user-stories.md` + `index.md` before starting it.
@@ -265,8 +265,71 @@ payload. `next build` + `next lint` + backend import all clean.
 still misheard sometimes). `transcription_confidence` is computed and gated
 client-side but NOT persisted (no DB yet — TEXT-3).
 
-**VOICE-3 hand-off:** TTS reads the assistant text reply; it's already Roman-Urdu
-for voice turns. Adapter goes in `backend/app/services/voice.py`.
+---
+
+## DONE: VOICE-3 — Text-to-speech reply playback
+
+Voice-turn reply text → backend TTS adapter → MP3 → played aloud. Reply is always
+shown as text; audio degrades gracefully (failure / autoplay-block → tap-to-play).
+
+**Files created:**
+```
+backend/app/services/voice.py   synthesize(text, voice=None) -> mp3 bytes. Provider
+                                behind one interface, picked by TTS_PROVIDER:
+                                - edge (default): edge-tts, no key, ur-PK neural
+                                  voices via Edge's (unofficial) endpoint.
+                                - azure: same ur-PK voices via Azure Speech REST +
+                                  SSML (needs AZURE_SPEECH_KEY/REGION). SSML MUST
+                                  carry xmlns=".../synthesis" or Azure ignores
+                                  <voice> and uses the region default (Hindi in
+                                  centralindia).
+                                Optional TTS_TRANSLITERATE: a Groq call rewrites the
+                                Roman-Urdu reply to Urdu script before synthesis
+                                (ur-PK voices read Latin text poorly / truncate);
+                                best-effort, falls back to the original on error.
+                                TTSError on failure.
+frontend/src/lib/voice/tts.ts   synthesizeSpeech(text) -> audio Blob, 20s timeout.
+frontend/src/lib/voice/useReplySpeech.ts   one <audio>; speak(id,text)/stop();
+                                status idle|loading|playing|blocked|error; autoplay
+                                reject = "blocked" not error; supersede guard.
+frontend/src/components/voice/ReplaySpeechButton.tsx   🔊 Suniye / ⏹ Rokiye control.
+```
+
+**Files edited:**
+```
+backend/app/routers/voice.py    + POST /voice/speak {text} -> audio/mpeg (502 if
+                                unconfigured, 422 empty, 8k-char cap)
+backend/app/config.py           + tts_provider, tts_voice, tts_rate, tts_transliterate,
+                                azure_speech_key, azure_speech_region
+backend/.env.example            + TTS_PROVIDER / TTS_VOICE / TTS_RATE / TTS_TRANSLITERATE
+                                / AZURE_SPEECH_KEY / AZURE_SPEECH_REGION
+backend/pyproject.toml          + edge-tts
+frontend/src/lib/types.ts       + Message.spoken?: boolean
+frontend/src/components/chat/ChatScreen.tsx   accumulates reply text; on a voice-turn
+                                reply completing → marks spoken + speech.speak(...)
+frontend/src/components/chat/ChatThread.tsx + ChatBubble.tsx   render the replay
+                                button for spoken, complete assistant messages
+```
+
+**Config to run:** nothing required — `TTS_PROVIDER=edge` (default) needs no key,
+just internet. For Azure: `TTS_PROVIDER=azure` + `AZURE_SPEECH_KEY` +
+`AZURE_SPEECH_REGION` (short name, e.g. `centralindia`). `TTS_VOICE` picks the
+voice for either provider: `ur-PK-AsadNeural` (M) / `ur-PK-UzmaNeural` (F).
+
+**Tested:** voice message → reply spoken aloud; replay button works; broken
+provider → text only, no hang; `TTS_TRANSLITERATE=true` improves ur-PK
+pronunciation and fixes edge-tts mid-sentence truncation. `next build` +
+`next lint` + backend import clean.
+
+**Known / expected:** edge-tts is an unofficial MS endpoint — fine for dev, can
+rate-limit / break / truncate; switch to Azure for the demo (0.5M chars/mo free).
+Roman-Urdu on ur-PK voices is rough without `TTS_TRANSLITERATE`. Azure vs edge
+quality difference is modest once transliteration is on. Typed-turn replies are
+NOT spoken (a global speaker toggle is VOICE-4). No audio caching/storage.
+
+**VOICE-4 hand-off:** capture, STT, and TTS are all in place and share the one
+`/conversations` thread. VOICE-4 is glue — voice+text interleave in order,
+type-to-correct a mis-transcription, and an optional "speak all replies" toggle.
 
 ---
 
@@ -303,13 +366,9 @@ They all reuse TEXT-2's stateless `POST /conversations/{id}/messages` endpoint.
 - **VOICE-2** — DONE (see the "DONE: VOICE-2" section above). Speechmatics batch,
   Groq whisper-large-v3 as an A-B fallback; `channel=voice` threaded through to a
   Roman-Urdu reply nudge.
-- **VOICE-3** — assistant reply text → TTS **behind an adapter interface**
-  (`backend/app/services/voice.py`), so the provider can be swapped without touching
-  capture or STT. Always show the reply as text too; degrade gracefully if TTS fails.
-  **Provider: `edge-tts`** (`uv add edge-tts`) — free, no key / no card / no signup,
-  gives the real Pakistani Urdu neural voices `ur-PK-UzmaNeural` (F) / `ur-PK-AsadNeural`
-  (M). Unofficial (uses Edge's endpoint) — the adapter lets us swap to official Azure
-  TTS (same voices, needs a card) later. Speechmatics has NO usable Urdu TTS.
+- **VOICE-3** — DONE (see the "DONE: VOICE-3" section above). Adapter in
+  `backend/app/services/voice.py`; edge-tts (default) + Azure REST, `ur-PK` voices,
+  optional Groq transliteration to Urdu script.
 - **VOICE-4** — full speak→hear loop; voice + text share one conversation thread;
   a mis-transcription can be fixed by typing without restarting.
 

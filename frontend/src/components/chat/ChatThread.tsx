@@ -2,15 +2,24 @@
 
 import { useEffect, useRef } from "react";
 import type { Message } from "@/lib/types";
+import type { SpeechStatus } from "@/lib/voice/useReplySpeech";
 import { ChatBubble } from "./ChatBubble";
 import { PendingIndicator } from "./PendingIndicator";
+
+export interface SpeechControls {
+  activeId: string | null;
+  status: SpeechStatus;
+  onPlay: (message: Message) => void;
+  onStop: () => void;
+}
 
 interface Props {
   messages: Message[];
   onRetry: (userMessage: Message) => void;
+  speech?: SpeechControls;
 }
 
-export function ChatThread({ messages, onRetry }: Props) {
+export function ChatThread({ messages, onRetry, speech }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll on new messages or status changes
@@ -66,11 +75,30 @@ export function ChatThread({ messages, onRetry }: Props) {
             }
           }
 
+          // For spoken assistant replies: a play / replay control (VOICE-3).
+          let speechStatus: SpeechStatus | undefined;
+          let onSpeechPlay: (() => void) | undefined;
+          let onSpeechStop: (() => void) | undefined;
+          if (
+            speech &&
+            !isUser &&
+            msg.spoken &&
+            msg.status === "complete"
+          ) {
+            speechStatus =
+              speech.activeId === msg.id ? speech.status : "idle";
+            onSpeechPlay = () => speech.onPlay(msg);
+            onSpeechStop = speech.onStop;
+          }
+
           return (
             <ChatBubble
               key={msg.id}
               message={msg}
               onRetry={retryHandler}
+              speechStatus={speechStatus}
+              onSpeechPlay={onSpeechPlay}
+              onSpeechStop={onSpeechStop}
             />
           );
         })}

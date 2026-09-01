@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import type { Channel, Message } from "@/lib/types";
 import { sendMessage, MAX_RECENT_TURNS } from "@/lib/chatApi";
+import { useReplySpeech } from "@/lib/voice/useReplySpeech";
 import { ChatThread } from "./ChatThread";
 import { ChatInput } from "./ChatInput";
 import { VoiceBar } from "@/components/voice/VoiceBar";
@@ -26,9 +27,11 @@ export function ChatScreen() {
   const [messages, setMessages] = useState<Message[]>([]);
   // One conversation ID per tab session — stable across messages.
   const [conversationId] = useState(() => generateId());
+  const speech = useReplySpeech();
 
   const handleSend = useCallback(
     async (text: string, channel: Channel = "text") => {
+      let replyText = "";
       // ── FIX B: build recent_turns BEFORE appending the new user message,
       // so the current message is not sent twice (once in recent_turns, once as text).
       const recentTurns = toTurns(messages);
@@ -59,6 +62,7 @@ export function ChatScreen() {
           recentTurns,
           {
             onDelta: (delta) => {
+              replyText += delta;
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === pendingMsg.id
@@ -73,13 +77,19 @@ export function ChatScreen() {
               );
             },
             onComplete: () => {
+              const speakThis = channel === "voice" && replyText.trim().length > 0;
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === pendingMsg.id
-                    ? { ...m, status: "complete" as const }
+                    ? {
+                        ...m,
+                        status: "complete" as const,
+                        spoken: speakThis || undefined,
+                      }
                     : m,
                 ),
               );
+              if (speakThis) void speech.speak(pendingMsg.id, replyText);
             },
           },
           channel,
@@ -108,6 +118,7 @@ export function ChatScreen() {
   // and re-streams against the existing user message.
   const handleRetry = useCallback(
     async (userMessage: Message) => {
+      let replyText = "";
       // FIX: use message ID to find the failed assistant bubble — createdAt
       // timestamps can be equal (same JS tick), breaking > comparison.
       const userIdx = messages.findIndex((m) => m.id === userMessage.id);
@@ -145,6 +156,7 @@ export function ChatScreen() {
           recentTurns,
           {
             onDelta: (delta) => {
+              replyText += delta;
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === pendingMsg.id
@@ -158,13 +170,20 @@ export function ChatScreen() {
               );
             },
             onComplete: () => {
+              const speakThis =
+                userMessage.channel === "voice" && replyText.trim().length > 0;
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === pendingMsg.id
-                    ? { ...m, status: "complete" as const }
+                    ? {
+                        ...m,
+                        status: "complete" as const,
+                        spoken: speakThis || undefined,
+                      }
                     : m,
                 ),
               );
+              if (speakThis) void speech.speak(pendingMsg.id, replyText);
             },
           },
           userMessage.channel ?? "text",
@@ -213,7 +232,16 @@ export function ChatScreen() {
         </header>
 
         {/* ── Thread (scrollable) ───────────────────────────── */}
-        <ChatThread messages={messages} onRetry={handleRetry} />
+        <ChatThread
+          messages={messages}
+          onRetry={handleRetry}
+          speech={{
+            activeId: speech.activeId,
+            status: speech.status,
+            onPlay: (m) => void speech.speak(m.id, m.text),
+            onStop: speech.stop,
+          }}
+        />
 
         {/* ── Voice bar (push-to-talk) ──────────────────────── */}
         <VoiceBar onSend={handleSend} disabled={isPending} />

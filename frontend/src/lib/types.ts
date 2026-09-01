@@ -11,4 +11,6 @@ export interface Message {
   createdAt: Date;
   /** Set on user messages; defaults to "text" when absent. */
   channel?: Channel;
+  /** Set on assistant messages that should be / were spoken aloud (VOICE-3). */
+  spoken?: boolean;
 }

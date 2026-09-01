@@ -36,6 +36,18 @@ class Settings(BaseSettings):
     groq_stt_model: str = "whisper-large-v3"
     groq_stt_api_key: str = ""  # falls back to LLM_API_KEY when blank
 
+    # Voice TTS (VOICE-3) — provider behind app.services.voice.synthesize()
+    tts_provider: str = "edge"  # "edge" | "azure"
+    tts_voice: str = "ur-PK-AsadNeural"  # or ur-PK-UzmaNeural (female)
+    tts_rate: str = "+0%"  # edge-tts prosody rate ("+0%", "-10%", ...)
+    # Roman-Urdu replies read poorly on ur-PK voices; when true, a Groq call
+    # transliterates to Urdu script before synthesis (falls back to the
+    # original text on any error).
+    tts_transliterate: bool = False
+    # Azure Speech (TTS_PROVIDER=azure) — REST endpoint, no SDK
+    azure_speech_key: str = ""
+    azure_speech_region: str = ""  # e.g. "eastus"
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
