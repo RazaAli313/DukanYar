@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import type { Message } from "@/lib/types";
+import type { Channel, Message } from "@/lib/types";
 import { sendMessage, MAX_RECENT_TURNS } from "@/lib/chatApi";
 import { ChatThread } from "./ChatThread";
 import { ChatInput } from "./ChatInput";
@@ -28,7 +28,7 @@ export function ChatScreen() {
   const [conversationId] = useState(() => generateId());
 
   const handleSend = useCallback(
-    async (text: string) => {
+    async (text: string, channel: Channel = "text") => {
       // ── FIX B: build recent_turns BEFORE appending the new user message,
       // so the current message is not sent twice (once in recent_turns, once as text).
       const recentTurns = toTurns(messages);
@@ -39,6 +39,7 @@ export function ChatScreen() {
         text,
         status: "complete",
         createdAt: new Date(),
+        channel,
       };
 
       const pendingMsg: Message = {
@@ -52,30 +53,38 @@ export function ChatScreen() {
       setMessages((prev) => [...prev, userMsg, pendingMsg]);
 
       try {
-        await sendMessage(conversationId, text, recentTurns, {
-          onDelta: (delta) => {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === pendingMsg.id
-                  ? {
-                      ...m,
-                      text: m.text + delta,
-                      // Flip to "streaming" on first delta
-                      status: m.status === "pending" ? "streaming" : m.status,
-                    }
-                  : m,
-              ),
-            );
+        await sendMessage(
+          conversationId,
+          text,
+          recentTurns,
+          {
+            onDelta: (delta) => {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === pendingMsg.id
+                    ? {
+                        ...m,
+                        text: m.text + delta,
+                        // Flip to "streaming" on first delta
+                        status: m.status === "pending" ? "streaming" : m.status,
+                      }
+                    : m,
+                ),
+              );
+            },
+            onComplete: () => {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === pendingMsg.id
+                    ? { ...m, status: "complete" as const }
+                    : m,
+                ),
+              );
+            },
           },
-          onComplete: () => {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === pendingMsg.id ? { ...m, status: "complete" as const } : m,
-              ),
-            );
-          },
-        });
-      } catch (err) {
+          channel,
+        );
+      } catch {
         setMessages((prev) =>
           prev.map((m) =>
             m.id === pendingMsg.id
@@ -130,28 +139,36 @@ export function ChatScreen() {
       setMessages((prev) => [...prev, pendingMsg]);
 
       try {
-        await sendMessage(conversationId, userMessage.text, recentTurns, {
-          onDelta: (delta) => {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === pendingMsg.id
-                  ? {
-                      ...m,
-                      text: m.text + delta,
-                      status: m.status === "pending" ? "streaming" : m.status,
-                    }
-                  : m,
-              ),
-            );
+        await sendMessage(
+          conversationId,
+          userMessage.text,
+          recentTurns,
+          {
+            onDelta: (delta) => {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === pendingMsg.id
+                    ? {
+                        ...m,
+                        text: m.text + delta,
+                        status: m.status === "pending" ? "streaming" : m.status,
+                      }
+                    : m,
+                ),
+              );
+            },
+            onComplete: () => {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === pendingMsg.id
+                    ? { ...m, status: "complete" as const }
+                    : m,
+                ),
+              );
+            },
           },
-          onComplete: () => {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === pendingMsg.id ? { ...m, status: "complete" as const } : m,
-              ),
-            );
-          },
-        });
+          userMessage.channel ?? "text",
+        );
       } catch {
         setMessages((prev) =>
           prev.map((m) =>

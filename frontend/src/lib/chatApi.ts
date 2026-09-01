@@ -18,6 +18,9 @@ interface Turn {
   content: string;
 }
 
+/** Origin of the message being sent — the backend tags it on the turn (VOICE-2). */
+export type Channel = "text" | "voice";
+
 interface StreamCallbacks {
   /** Called for each incremental text delta. */
   onDelta: (delta: string) => void;
@@ -35,6 +38,7 @@ export async function sendMessage(
   text: string,
   recentTurns: Turn[],
   callbacks: StreamCallbacks,
+  channel: Channel = "text",
 ): Promise<void> {
   // Abort the request if no response arrives within the timeout.
   const controller = new AbortController();
@@ -46,7 +50,7 @@ export async function sendMessage(
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, recent_turns: recentTurns }),
+        body: JSON.stringify({ text, recent_turns: recentTurns, channel }),
         signal: controller.signal,
       },
     );

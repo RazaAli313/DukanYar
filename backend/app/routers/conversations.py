@@ -60,7 +60,7 @@ async def send_message(conversation_id: str, body: MessageRequest):
 
     async def event_stream():
         try:
-            async for delta in llm.stream_reply(messages):
+            async for delta in llm.stream_reply(messages, body.channel):
                 yield _sse_event("delta", {"text": delta})
             yield _sse_event("done", {})
         except (APIError, APITimeoutError) as exc:

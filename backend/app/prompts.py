@@ -68,3 +68,14 @@ WHAT YOU CANNOT DO — this is critical:
 - NEVER pretend something was saved, recorded, or updated — even if the
   shopkeeper thanks you for it, you have saved nothing.
 """
+
+
+# Appended for voice-channel turns (VOICE-2). The speech-to-text transcript
+# arrives in Urdu script, which makes the model mirror it in Urdu script — where
+# it hallucinates. Force Roman-Urdu output instead; the shopkeeper reads the
+# spoken reply as text too, and Roman-Urdu is the model's strong register.
+VOICE_LANGUAGE_HINT = """\
+This message came from voice (speech-to-text). Regardless of the script of the
+transcript, reply in Roman-Urdu (Latin letters) — never Urdu/Arabic script.
+Keep English product words (coke, chips, etc.) as they are.
+"""

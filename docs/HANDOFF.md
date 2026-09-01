@@ -2,7 +2,7 @@
 
 **Owner:** Usman (Muhammad Usman Tariq)
 **Branch:** `feat/text-voice-module` → PR against `develop` (Raza reviews & merges)
-**Last updated:** 2026-09-01 (TEXT-1, TEXT-2, TEXT-4, VOICE-1 done; TEXT-3 blocked on DB)
+**Last updated:** 2026-09-01 (TEXT-1, TEXT-2, TEXT-4, VOICE-1, VOICE-2 done; TEXT-3 blocked on DB)
 **Module scope:** the TEXT pillar (TEXT-1..4) and the VOICE pillar (VOICE-1..4).
 Tickets: `docs/text-model/`, `docs/voice/`. Read each ticket's `.md` +
 `user-stories.md` + `index.md` before starting it.
@@ -202,6 +202,74 @@ demo host must be HTTPS). Primary target Chrome; mime negotiation covers Safari.
 
 ---
 
+## DONE: VOICE-2 — Speech-to-text (STT) integration
+
+Captured clip → backend proxy → Speechmatics → real transcript → the shared
+`/conversations` endpoint tagged `channel="voice"`. Transcript shows as the user
+bubble; low-confidence / empty → retry prompt, nothing sent.
+
+**Files created:**
+```
+backend/app/services/stt.py     transcribe(audio, content_type) -> Transcript{text,
+                                confidence}. Provider behind one interface, picked
+                                by STT_PROVIDER:
+                                - speechmatics (default): batch REST — create job
+                                  (multipart data_file + config JSON, language "ur",
+                                  operating_point "enhanced", additional_vocab from
+                                  STT_EXTRA_VOCAB) → poll GET /jobs/{id} (~1s, ~25s
+                                  cap) → GET transcript?format=json-v2 → join words,
+                                  mean word confidence.
+                                - groq: whisper-large-v3 on the LLM key; confidence
+                                  approximated from segment avg_logprob.
+backend/app/routers/voice.py    POST /voice/transcribe (multipart file) -> {transcript,
+                                confidence}. 10MB cap, 502 if unconfigured, 422 empty.
+```
+
+**Files edited:**
+```
+backend/app/config.py           + stt_provider, stt_language, stt_extra_vocab,
+                                speechmatics_* , groq_stt_* ; helpers
+                                stt_extra_vocab_list, effective_groq_stt_key
+backend/app/main.py             mounts voice.router at /voice
+backend/app/prompts.py          + VOICE_LANGUAGE_HINT — voice turns reply in
+                                Roman-Urdu (STT gives Urdu script → gpt-oss-120b
+                                hallucinates script; Roman-Urdu is its strong register)
+backend/app/services/llm.py     stream_reply(turns, channel="text") — appends
+                                VOICE_LANGUAGE_HINT as a 2nd system msg when voice
+backend/app/routers/conversations.py  passes body.channel into stream_reply
+backend/.env.example            + STT_PROVIDER / SPEECHMATICS_API_KEY / STT_EXTRA_VOCAB / ...
+backend/pyproject.toml          pins httpx (was transitive via fastapi[standard])
+frontend/src/lib/voice/stt.ts   real transcribeAudio() — uploads blob to
+                                /voice/transcribe, 40s timeout, returns
+                                {transcript, confidence}. exports STT_MIN_CONFIDENCE=0.5
+frontend/src/lib/chatApi.ts     sendMessage(..., channel: "text"|"voice" = "text")
+                                — added to request body
+frontend/src/lib/types.ts       + Channel type, optional Message.channel
+frontend/src/components/chat/ChatScreen.tsx   handleSend(text, channel); user bubble
+                                tagged; retry keeps the original channel
+frontend/src/components/voice/VoiceBar.tsx     confidence/empty gate → "Awaaz saaf
+                                samajh nahi aayi" retry prompt; else onSend(t, "voice");
+                                error toast; "Likh raha hoon…" while transcribing
+```
+
+**Config to run:** `backend/.env` needs `STT_PROVIDER=speechmatics` +
+`SPEECHMATICS_API_KEY=...` (+ optional `STT_EXTRA_VOCAB`). A-B test Whisper with
+`STT_PROVIDER=groq` (reuses `LLM_API_KEY`).
+
+**Tested:** real Urdu / code-switched speech → transcript (Urdu script) → Roman-Urdu
+reply; silence → retry prompt, no `/conversations` call; `channel:"voice"` in the
+payload. `next build` + `next lint` + backend import all clean.
+
+**Known / expected:** transcript is Urdu script (no Roman-Urdu STT mode exists);
+`additional_vocab` biases but doesn't guarantee accented English words ("chips"
+still misheard sometimes). `transcription_confidence` is computed and gated
+client-side but NOT persisted (no DB yet — TEXT-3).
+
+**VOICE-3 hand-off:** TTS reads the assistant text reply; it's already Roman-Urdu
+for voice turns. Adapter goes in `backend/app/services/voice.py`.
+
+---
+
 ## LLM provider — current state (2026-09-01)
 
 Google locked new API keys to `gemini-3.6-flash` only (20 requests/day free) —
@@ -210,7 +278,7 @@ Google locked new API keys to `gemini-3.6-flash` only (20 requests/day free) —
 LLM_BASE_URL=https://api.groq.com/openai/v1
 LLM_API_KEY=gsk_...            # console.groq.com — free
 LLM_MODEL=openai/gpt-oss-120b  # best free option for Roman-Urdu; qwen3.x-27b was weaker
-LLM_REASONING_EFFORT=none      # Groq: none/low/medium/high (not "minimal")
+LLM_REASONING_EFFORT=low       # Groq now REJECTS "none" for gpt-oss-120b — must be low/medium/high
 ```
 Roman-Urdu is coherent; Urdu script still hallucinates on gpt-oss-120b. **Before the
 demo**, switch to Alibaba Model Studio Qwen (`qwen-plus`/`qwen-max`, free tier ~1M
@@ -232,12 +300,9 @@ Build order per `docs/voice/index.md`: VOICE-1 → (VOICE-2 ∥ VOICE-3) → VOI
 They all reuse TEXT-2's stateless `POST /conversations/{id}/messages` endpoint.
 
 - **VOICE-1** — DONE (see the "DONE: VOICE-1" section above).
-- **VOICE-2** — captured audio → STT → transcript → the **same** `/messages` endpoint
-  tagged `channel=voice`; set `transcription_confidence`; prompt retry on empty /
-  low-confidence.
-  **Provider: Speechmatics** (user has an API key). Strong on accented / noisy speech
-  and Urdu-English code-switching. Groq's `whisper-large-v3` (same key as the LLM) is a
-  fallback.
+- **VOICE-2** — DONE (see the "DONE: VOICE-2" section above). Speechmatics batch,
+  Groq whisper-large-v3 as an A-B fallback; `channel=voice` threaded through to a
+  Roman-Urdu reply nudge.
 - **VOICE-3** — assistant reply text → TTS **behind an adapter interface**
   (`backend/app/services/voice.py`), so the provider can be swapped without touching
   capture or STT. Always show the reply as text too; degrade gracefully if TTS fails.

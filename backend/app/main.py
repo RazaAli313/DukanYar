@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import conversations
+from app.routers import conversations, voice
 
 app = FastAPI(title=f"{settings.app_name} API")
 
@@ -22,3 +22,4 @@ def health() -> dict[str, str]:
 
 # Feature routers are mounted here as tickets land:
 app.include_router(conversations.router, prefix="/conversations")
+app.include_router(voice.router, prefix="/voice")

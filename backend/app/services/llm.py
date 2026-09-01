@@ -9,7 +9,7 @@ from collections.abc import AsyncGenerator
 from openai import AsyncOpenAI
 
 from app.config import settings
-from app.prompts import SYSTEM_PROMPT
+from app.prompts import SYSTEM_PROMPT, VOICE_LANGUAGE_HINT
 
 _client: AsyncOpenAI | None = None
 
@@ -24,16 +24,24 @@ def _get_client() -> AsyncOpenAI:
     return _client
 
 
-async def stream_reply(turns: list[dict[str, str]]) -> AsyncGenerator[str, None]:
+async def stream_reply(
+    turns: list[dict[str, str]],
+    channel: str = "text",
+) -> AsyncGenerator[str, None]:
     """Stream an assistant reply token-by-token.
 
     *turns* is the conversation so far (prior turns + the new user message)
     as OpenAI-style {"role", "content"} dicts. The TEXT-4 system persona
     (app.prompts.SYSTEM_PROMPT) is prepended here as the first message.
+    *channel* is where the latest user message came from ("text" | "voice");
+    voice turns get an extra system nudge to answer in Roman-Urdu (VOICE-2).
     Yields incremental text deltas (not accumulated).
     """
     # TEXT-4: the system prompt always leads the message list.
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}, *turns]
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    if channel == "voice":
+        messages.append({"role": "system", "content": VOICE_LANGUAGE_HINT})
+    messages.extend(turns)
     client = _get_client()
     # reasoning_effort is provider-specific (Gemini 3: "minimal", Groq:
     # "none") — configured via .env. An empty value omits the parameter

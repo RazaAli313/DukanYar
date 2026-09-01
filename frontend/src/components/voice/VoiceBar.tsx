@@ -1,11 +1,14 @@
 "use client";
 
 /**
- * VOICE-1 — voice bar mounted above the text input.
+ * Voice bar mounted above the text input.
  *
- * Owns the release flow: guard-passed clip -> stub transcript -> onSend (the
- * same path typed messages take, which is what makes voice and text
- * interchangeable). The audio blob never leaves the browser in this ticket.
+ * Release flow (VOICE-1 capture -> VOICE-2 transcription):
+ *   guard-passed clip -> POST /voice/transcribe -> confidence gate ->
+ *   onSend(transcript, "voice") — the same path typed messages take, which is
+ *   what makes voice and text interchangeable.
+ * The audio blob is uploaded only to our own backend, which proxies to the STT
+ * provider.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -13,12 +16,12 @@ import {
   usePushToTalk,
   type CapturedAudio,
 } from "@/lib/voice/usePushToTalk";
-import { transcribeAudio } from "@/lib/voice/stt";
+import { transcribeAudio, STT_MIN_CONFIDENCE } from "@/lib/voice/stt";
 import { PushToTalkButton } from "./PushToTalkButton";
 import { RecordingIndicator } from "./RecordingIndicator";
 
 interface Props {
-  onSend: (text: string) => void | Promise<void>;
+  onSend: (text: string, channel?: "text" | "voice") => void | Promise<void>;
   /** True while an assistant reply is streaming — mirrors the send button. */
   disabled: boolean;
 }
@@ -46,13 +49,19 @@ export function VoiceBar({ onSend, disabled }: Props) {
       if (disabledRef.current) return;
       setTranscribing(true);
       try {
-        const text = await transcribeAudio(clip);
-        if (text.trim()) await onSend(text);
+        const { transcript, confidence } = await transcribeAudio(clip);
+        if (!transcript.trim() || confidence < STT_MIN_CONFIDENCE) {
+          showHint("Awaaz saaf samajh nahi aayi — dobara boliye");
+          return;
+        }
+        await onSend(transcript, "voice");
+      } catch {
+        showHint("Transcription nahi ho saki — dobara koshish karein");
       } finally {
         setTranscribing(false);
       }
     },
-    [onSend],
+    [onSend, showHint],
   );
 
   const { status, elapsedMs, error, start, stop, cancel } = usePushToTalk({
@@ -91,7 +100,7 @@ export function VoiceBar({ onSend, disabled }: Props) {
             <RecordingIndicator elapsedMs={elapsedMs} />
           ) : transcribing ? (
             <span className="text-[0.8125rem] text-slate-400">
-              Sun kar samajh raha hoon…
+              Likh raha hoon…
             </span>
           ) : showDenied || showError ? (
             <span className="text-[0.8125rem] text-rose-300">{error}</span>
