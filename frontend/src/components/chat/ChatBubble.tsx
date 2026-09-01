@@ -9,6 +9,8 @@ interface Props {
   speechStatus?: SpeechStatus;
   onSpeechPlay?: () => void;
   onSpeechStop?: () => void;
+  /** When set, this is the latest voice turn — offer a re-speak (VOICE-4). */
+  onRedoVoice?: () => void;
 }
 
 export function ChatBubble({
@@ -17,8 +19,10 @@ export function ChatBubble({
   speechStatus,
   onSpeechPlay,
   onSpeechStop,
+  onRedoVoice,
 }: Props) {
   const isUser = message.sender === "user";
+  const isVoice = message.channel === "voice";
   const rtl = isRtl(message.text);
 
   return (
@@ -38,8 +42,9 @@ export function ChatBubble({
         <p className="text-[0.9375rem] leading-[1.55]">{message.text}</p>
       </div>
 
-      {/* Timestamp — small, muted, below the bubble */}
+      {/* Timestamp — small, muted, below the bubble. Voice turns get a 🎤 tag. */}
       <span className="px-1 text-[0.6875rem] leading-none text-slate-600">
+        {isUser && isVoice && <span className="mr-1">🎤</span>}
         {message.createdAt.toLocaleTimeString([], {
           hour: "2-digit",
           minute: "2-digit",
@@ -61,6 +66,15 @@ export function ChatBubble({
           onPlay={onSpeechPlay}
           onStop={onSpeechStop}
         />
+      )}
+
+      {onRedoVoice && (
+        <button
+          onClick={onRedoVoice}
+          className="mt-0.5 inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs font-medium text-slate-300 transition-colors hover:bg-slate-700"
+        >
+          <span aria-hidden>↺</span> Ghalat? Phir bolein
+        </button>
       )}
     </div>
   );

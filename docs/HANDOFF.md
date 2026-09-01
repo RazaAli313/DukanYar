@@ -2,7 +2,7 @@
 
 **Owner:** Usman (Muhammad Usman Tariq)
 **Branch:** `feat/text-voice-module` → PR against `develop` (Raza reviews & merges)
-**Last updated:** 2026-09-01 (TEXT-1, TEXT-2, TEXT-4, VOICE-1, VOICE-2, VOICE-3 done; TEXT-3 blocked on DB)
+**Last updated:** 2026-09-01 (TEXT-1, TEXT-2, TEXT-4 and the whole VOICE epic done; TEXT-3 blocked on DB)
 **Module scope:** the TEXT pillar (TEXT-1..4) and the VOICE pillar (VOICE-1..4).
 Tickets: `docs/text-model/`, `docs/voice/`. Read each ticket's `.md` +
 `user-stories.md` + `index.md` before starting it.
@@ -324,12 +324,53 @@ pronunciation and fixes edge-tts mid-sentence truncation. `next build` +
 **Known / expected:** edge-tts is an unofficial MS endpoint — fine for dev, can
 rate-limit / break / truncate; switch to Azure for the demo (0.5M chars/mo free).
 Roman-Urdu on ur-PK voices is rough without `TTS_TRANSLITERATE`. Azure vs edge
-quality difference is modest once transliteration is on. Typed-turn replies are
-NOT spoken (a global speaker toggle is VOICE-4). No audio caching/storage.
+quality difference is modest once transliteration is on. No audio caching/storage.
 
-**VOICE-4 hand-off:** capture, STT, and TTS are all in place and share the one
-`/conversations` thread. VOICE-4 is glue — voice+text interleave in order,
-type-to-correct a mis-transcription, and an optional "speak all replies" toggle.
+---
+
+## DONE: VOICE-4 — End-to-end loop & multimodal parity
+
+Frontend-only. Because voice already rides the same `handleSend` path as typed
+text, 3 of the 4 ACs were satisfied by the architecture — this adds the polish.
+
+**AC status:**
+- Full voice round-trip, no manual steps → already worked (VOICE-1→2→3 chain).
+- Voice + text in one thread, in order → already worked; voice turns now show a 🎤 tag.
+- Typed follow-up uses the prior voice turn as context → already worked (`toTurns`
+  is channel-agnostic; backend prepends all prior turns).
+- Mis-transcription recovery → **reinterpreted: re-speak, not re-type.** Shopkeepers
+  don't type Urdu and voice is the primary input, so a "correct by typing"
+  affordance is the wrong tool. Instead: a "↺ Ghalat? Phir bolein" button on the
+  most recent voice turn discards it + everything after and invites a fresh
+  recording.
+
+**Files edited:**
+```
+frontend/src/components/chat/ChatBubble.tsx    🎤 tag on voice user bubbles;
+                                "↺ Ghalat? Phir bolein" button
+frontend/src/components/chat/ChatThread.tsx    finds the most recent voice user
+                                turn (even behind later text turns); shows the
+                                redo button there when not mid-reply
+frontend/src/components/chat/ChatScreen.tsx    handleRedoVoice() — stop audio,
+                                slice the thread to before that turn, flash a
+                                "Phir boliye" prompt; speech.stop() at the start
+                                of every send; 🔊/🔇 header toggle (speakReplies,
+                                default ON) — now EVERY reply is spoken (voice or
+                                text), not just voice turns
+frontend/src/components/voice/VoiceBar.tsx     onCaptureStart (stops a playing
+                                reply when a new recording begins); `notice` prop
+                                for the "Phir boliye" prompt
+```
+
+**Tested:** full voice loop with no clicks between stages; voice+text interleaved
+in order with 🎤 tags; typed follow-up carries voice context; ↺ redo discards the
+turn + trailing turns and re-records cleanly; 🔊 toggle mutes/unmutes all replies
+and stops in-flight playback. `next build` + `next lint` clean. No backend change.
+
+**Known / expected:** redo trims the thread from the chosen turn onward (its reply
+and any later turns, including typed ones) — intentional, a bad base turn usually
+makes the rest of the exchange wrong too. `speakReplies` state is per-tab, not
+persisted.
 
 ---
 
@@ -357,20 +398,18 @@ scope every query by `shop_id`, feed recent turns as context to the LLM.
 **Needs Sheheryar's real `db.py` (Supabase client) + the `conversations` / `messages`
 tables.** Until those land, TEXT-3 is blocked — do TEXT-4 first if so.
 
-## Then, in order — the VOICE epic (all 4 are DB-independent; do them now, don't wait for TEXT-3)
+## The VOICE epic — DONE (all 4)
 
-Build order per `docs/voice/index.md`: VOICE-1 → (VOICE-2 ∥ VOICE-3) → VOICE-4.
-They all reuse TEXT-2's stateless `POST /conversations/{id}/messages` endpoint.
+All reuse TEXT-2's stateless `POST /conversations/{id}/messages`. Details in the
+"DONE: VOICE-1/2/3/4" sections above.
 
-- **VOICE-1** — DONE (see the "DONE: VOICE-1" section above).
-- **VOICE-2** — DONE (see the "DONE: VOICE-2" section above). Speechmatics batch,
-  Groq whisper-large-v3 as an A-B fallback; `channel=voice` threaded through to a
-  Roman-Urdu reply nudge.
-- **VOICE-3** — DONE (see the "DONE: VOICE-3" section above). Adapter in
-  `backend/app/services/voice.py`; edge-tts (default) + Azure REST, `ur-PK` voices,
-  optional Groq transliteration to Urdu script.
-- **VOICE-4** — full speak→hear loop; voice + text share one conversation thread;
-  a mis-transcription can be fixed by typing without restarting.
+- **VOICE-1** — push-to-talk capture.
+- **VOICE-2** — Speechmatics STT (Groq whisper A-B fallback); `channel=voice`
+  threaded through to a Roman-Urdu reply nudge.
+- **VOICE-3** — TTS adapter in `backend/app/services/voice.py`; edge-tts (default)
+  + Azure REST, `ur-PK` voices, optional Groq transliteration to Urdu script.
+- **VOICE-4** — full loop + multimodal parity; 🎤 tags, "↺ Ghalat? Phir bolein"
+  re-speak recovery, 🔊/🔇 speak-all-replies toggle.
 
 ## Blocked until Sheheryar's DB lands
 

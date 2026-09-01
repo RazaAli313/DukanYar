@@ -17,9 +17,11 @@ interface Props {
   messages: Message[];
   onRetry: (userMessage: Message) => void;
   speech?: SpeechControls;
+  /** Re-speak the latest voice turn (VOICE-4) — discards it and everything after. */
+  onRedoVoice?: (userMessage: Message) => void;
 }
 
-export function ChatThread({ messages, onRetry, speech }: Props) {
+export function ChatThread({ messages, onRetry, speech, onRedoVoice }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll on new messages or status changes
@@ -31,6 +33,19 @@ export function ChatThread({ messages, onRetry, speech }: Props) {
   const lastMsg = messages[messages.length - 1];
   const showPending =
     lastMsg?.sender === "assistant" && lastMsg.status === "pending";
+
+  // The most recent voice turn gets a re-speak affordance (VOICE-4), as long as
+  // the exchange isn't mid-flight. It stays available even if later text turns
+  // followed — re-speaking discards that voice turn and everything after it.
+  const busy =
+    lastMsg?.status === "pending" || lastMsg?.status === "streaming";
+  let latestVoiceUserId: string | null = null;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].sender === "user" && messages[i].channel === "voice") {
+      latestVoiceUserId = messages[i].id;
+      break;
+    }
+  }
 
   // ── Empty state ────────────────────────────────────────────
   if (messages.length === 0) {
@@ -91,6 +106,11 @@ export function ChatThread({ messages, onRetry, speech }: Props) {
             onSpeechStop = speech.onStop;
           }
 
+          const redoHandler =
+            !busy && onRedoVoice && msg.id === latestVoiceUserId
+              ? () => onRedoVoice(msg)
+              : undefined;
+
           return (
             <ChatBubble
               key={msg.id}
@@ -99,6 +119,7 @@ export function ChatThread({ messages, onRetry, speech }: Props) {
               speechStatus={speechStatus}
               onSpeechPlay={onSpeechPlay}
               onSpeechStop={onSpeechStop}
+              onRedoVoice={redoHandler}
             />
           );
         })}

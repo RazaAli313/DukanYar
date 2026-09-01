@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import type { Channel, Message } from "@/lib/types";
 import { sendMessage, MAX_RECENT_TURNS } from "@/lib/chatApi";
 import { useReplySpeech } from "@/lib/voice/useReplySpeech";
@@ -28,10 +28,27 @@ export function ChatScreen() {
   // One conversation ID per tab session — stable across messages.
   const [conversationId] = useState(() => generateId());
   const speech = useReplySpeech();
+  // Speak assistant replies aloud (any channel). On by default — voice-first.
+  const [speakReplies, setSpeakReplies] = useState(true);
+  const speakRepliesRef = useRef(speakReplies);
+  useEffect(() => {
+    speakRepliesRef.current = speakReplies;
+  }, [speakReplies]);
+
+  const [voiceNotice, setVoiceNotice] = useState<string | null>(null);
+  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flashVoiceNotice = useCallback((msg: string) => {
+    setVoiceNotice(msg);
+    if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+    noticeTimerRef.current = setTimeout(() => setVoiceNotice(null), 4000);
+  }, []);
 
   const handleSend = useCallback(
     async (text: string, channel: Channel = "text") => {
       let replyText = "";
+      speech.stop(); // a new message supersedes any playing reply
+      setVoiceNotice(null);
       // ── FIX B: build recent_turns BEFORE appending the new user message,
       // so the current message is not sent twice (once in recent_turns, once as text).
       const recentTurns = toTurns(messages);
@@ -77,7 +94,8 @@ export function ChatScreen() {
               );
             },
             onComplete: () => {
-              const speakThis = channel === "voice" && replyText.trim().length > 0;
+              const speakThis =
+                speakRepliesRef.current && replyText.trim().length > 0;
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === pendingMsg.id
@@ -171,7 +189,7 @@ export function ChatScreen() {
             },
             onComplete: () => {
               const speakThis =
-                userMessage.channel === "voice" && replyText.trim().length > 0;
+                speakRepliesRef.current && replyText.trim().length > 0;
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === pendingMsg.id
@@ -206,6 +224,21 @@ export function ChatScreen() {
     [messages, conversationId],
   );
 
+  // ── VOICE-4: re-speak a mis-transcribed voice turn.
+  // Drops that turn + everything after it, then invites a fresh recording.
+  // Shopkeepers don't type Urdu, so correction is by voice, not by editing text.
+  const handleRedoVoice = useCallback(
+    (userMessage: Message) => {
+      speech.stop();
+      setMessages((prev) => {
+        const idx = prev.findIndex((m) => m.id === userMessage.id);
+        return idx === -1 ? prev : prev.slice(0, idx);
+      });
+      flashVoiceNotice("Phir boliye — mic dabaye rakhein");
+    },
+    [speech, flashVoiceNotice],
+  );
+
   const isPending =
     messages.length > 0 &&
     (messages[messages.length - 1].status === "pending" ||
@@ -216,7 +249,7 @@ export function ChatScreen() {
       {/* ── Centered app column (720px) ───────────────────────── */}
       <div className="mx-auto flex h-full w-full max-w-[720px] flex-col">
         {/* ── Header ────────────────────────────────────────── */}
-        <header className="flex h-14 shrink-0 items-center border-b border-slate-800/40 bg-[var(--surface)] px-4">
+        <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-800/40 bg-[var(--surface)] px-4">
           <div className="flex items-center gap-3">
             <h1 className="text-[1.0625rem] font-semibold tracking-tight text-slate-100">
               DukanYar
@@ -229,12 +262,33 @@ export function ChatScreen() {
               AI
             </span>
           </div>
+
+          <button
+            onClick={() => {
+              setSpeakReplies((on) => {
+                if (on) speech.stop();
+                return !on;
+              });
+            }}
+            aria-pressed={speakReplies}
+            aria-label={
+              speakReplies ? "Awaaz band karein" : "Awaaz chaalu karein"
+            }
+            className={`flex h-8 w-8 items-center justify-center rounded-full text-base transition-colors ${
+              speakReplies
+                ? "bg-emerald-500/15 text-emerald-300"
+                : "bg-slate-800 text-slate-500"
+            }`}
+          >
+            {speakReplies ? "🔊" : "🔇"}
+          </button>
         </header>
 
         {/* ── Thread (scrollable) ───────────────────────────── */}
         <ChatThread
           messages={messages}
           onRetry={handleRetry}
+          onRedoVoice={handleRedoVoice}
           speech={{
             activeId: speech.activeId,
             status: speech.status,
@@ -244,7 +298,12 @@ export function ChatScreen() {
         />
 
         {/* ── Voice bar (push-to-talk) ──────────────────────── */}
-        <VoiceBar onSend={handleSend} disabled={isPending} />
+        <VoiceBar
+          onSend={handleSend}
+          disabled={isPending}
+          onCaptureStart={speech.stop}
+          notice={voiceNotice}
+        />
 
         {/* ── Input (pinned bottom) ─────────────────────────── */}
         <ChatInput onSend={handleSend} disabled={isPending} />

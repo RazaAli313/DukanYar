@@ -24,11 +24,15 @@ interface Props {
   onSend: (text: string, channel?: "text" | "voice") => void | Promise<void>;
   /** True while an assistant reply is streaming — mirrors the send button. */
   disabled: boolean;
+  /** Fired when the shopkeeper starts a new recording (stop any playing reply). */
+  onCaptureStart?: () => void;
+  /** Transient prompt from the parent, e.g. after a re-speak (VOICE-4). */
+  notice?: string | null;
 }
 
 const HINT_MS = 2500;
 
-export function VoiceBar({ onSend, disabled }: Props) {
+export function VoiceBar({ onSend, disabled, onCaptureStart, notice }: Props) {
   const [hint, setHint] = useState<string | null>(null);
   const [transcribing, setTranscribing] = useState(false);
   const hintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -68,6 +72,11 @@ export function VoiceBar({ onSend, disabled }: Props) {
     onAutoSubmit: submitClip,
   });
 
+  const handlePressStart = useCallback(() => {
+    onCaptureStart?.();
+    start();
+  }, [onCaptureStart, start]);
+
   const handlePressEnd = useCallback(async () => {
     const clip = await stop();
     if (!clip) {
@@ -90,7 +99,7 @@ export function VoiceBar({ onSend, disabled }: Props) {
         <PushToTalkButton
           status={status}
           disabled={disabled || transcribing}
-          onPressStart={start}
+          onPressStart={handlePressStart}
           onPressEnd={handlePressEnd}
           onPressCancel={cancel}
         />
@@ -106,6 +115,8 @@ export function VoiceBar({ onSend, disabled }: Props) {
             <span className="text-[0.8125rem] text-rose-300">{error}</span>
           ) : hint ? (
             <span className="text-[0.8125rem] text-amber-300">{hint}</span>
+          ) : notice ? (
+            <span className="text-[0.8125rem] text-emerald-300">{notice}</span>
           ) : (
             <span className="text-[0.8125rem] text-slate-500">
               Bolne ke liye mic dabaye rakhein
