@@ -24,7 +24,7 @@ speech input supports Urdu; speech output does not).
 
 | ID | Name | Status | Build Engineer | QA | DM |
 | :---- | :---- | :---- | :---- | :---- | :---- |
-| VOICE-1 | Push-to-talk capture | To Be Done | TBD | TBD | TBD |
+| VOICE-1 | Push-to-talk capture | Done | Usman | TBD | TBD |
 | VOICE-2 | Speech-to-text (STT) integration | To Be Done | TBD | TBD | TBD |
 | VOICE-3 | Text-to-speech (TTS) reply playback | To Be Done | TBD | TBD | TBD |
 | VOICE-4 | End-to-end voice loop & multimodal parity | To Be Done | TBD | TBD | TBD |

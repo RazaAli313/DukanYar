@@ -5,6 +5,7 @@ import type { Message } from "@/lib/types";
 import { sendMessage, MAX_RECENT_TURNS } from "@/lib/chatApi";
 import { ChatThread } from "./ChatThread";
 import { ChatInput } from "./ChatInput";
+import { VoiceBar } from "@/components/voice/VoiceBar";
 
 function generateId(): string {
   return crypto.randomUUID();
@@ -196,6 +197,9 @@ export function ChatScreen() {
 
         {/* ── Thread (scrollable) ───────────────────────────── */}
         <ChatThread messages={messages} onRetry={handleRetry} />
+
+        {/* ── Voice bar (push-to-talk) ──────────────────────── */}
+        <VoiceBar onSend={handleSend} disabled={isPending} />
 
         {/* ── Input (pinned bottom) ─────────────────────────── */}
         <ChatInput onSend={handleSend} disabled={isPending} />

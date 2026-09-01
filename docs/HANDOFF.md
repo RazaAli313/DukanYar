@@ -2,7 +2,7 @@
 
 **Owner:** Usman (Muhammad Usman Tariq)
 **Branch:** `feat/text-voice-module` → PR against `develop` (Raza reviews & merges)
-**Last updated:** 2026-09-01 (TEXT-1, TEXT-2, TEXT-4 done; TEXT-3 blocked on DB)
+**Last updated:** 2026-09-01 (TEXT-1, TEXT-2, TEXT-4, VOICE-1 done; TEXT-3 blocked on DB)
 **Module scope:** the TEXT pillar (TEXT-1..4) and the VOICE pillar (VOICE-1..4).
 Tickets: `docs/text-model/`, `docs/voice/`. Read each ticket's `.md` +
 `user-stories.md` + `index.md` before starting it.
@@ -148,6 +148,60 @@ arithmetic all pass. Urdu *script* quality is model-limited (see LLM note below)
 
 ---
 
+## DONE: VOICE-1 — Push-to-talk capture
+
+Frontend-only. Hold the mic to record, release to send. No new npm deps, no
+backend changes, the audio blob never leaves the browser.
+
+**Files created:**
+```
+frontend/src/lib/voice/usePushToTalk.ts   Capture state machine — getUserMedia +
+                                          MediaRecorder. Statuses idle/requesting/
+                                          recording/denied/error. Guards:
+                                          MIN_RECORD_MS=450, MIN_BLOB_BYTES=2048,
+                                          MAX_RECORD_MS=60000 (safety auto-stop).
+                                          Discards a clip if released while the
+                                          permission prompt is still open; always
+                                          stops mic tracks; unmount cleanup.
+frontend/src/lib/voice/stt.ts              transcribeAudio(clip) STUB — 600ms delay,
+                                          returns a random fixed Urdu sentence.
+                                          VOICE-2 swap point (Speechmatics).
+frontend/src/components/voice/
+  PushToTalkButton.tsx                     Big emerald mic (mockup SVG). Pointer
+                                          events + setPointerCapture (release off
+                                          the button still sends). animate-ping
+                                          ring while recording; long-press menu /
+                                          text selection suppressed; spinner on
+                                          "requesting"; muted-mic on "denied".
+  RecordingIndicator.tsx                   Pulsing dot + "Sun raha hoon…" + m:ss
+                                          timer, aria-live. Shown for the whole
+                                          capture.
+  VoiceBar.tsx                             Release flow: stop() -> guard -> stub
+                                          transcript -> onSend (same path typed
+                                          messages take). Re-checks disabled at
+                                          release; transient "bohat mukhtasar"
+                                          hint on a too-short tap; denied/error
+                                          notice pointing to browser mic settings.
+```
+
+**Shared-file edit (only one):** `frontend/src/components/chat/ChatScreen.tsx` —
+renders `<VoiceBar onSend={handleSend} disabled={isPending} />` between
+`<ChatThread>` and `<ChatInput>`. Nothing else touched.
+
+`next build` + `next lint` pass clean (0 errors).
+
+**Decisions:** dedicated voice bar above the input (not a small mic in the input
+row) to keep the mic big and voice-first; `channel:"voice"` tagging deferred to
+VOICE-2 (its AC; backend `MessageRequest.channel` already defaults to `"text"`).
+
+**Known / expected:** the transcript is a stub — it ignores your speech and
+returns a random canned sentence. Real STT is VOICE-2 and replaces ONLY the body
+of `transcribeAudio()` in `lib/voice/stt.ts`; capture and UI don't change.
+Secure-context only (mic is unavailable over plain HTTP — fine on localhost, the
+demo host must be HTTPS). Primary target Chrome; mime negotiation covers Safari.
+
+---
+
 ## LLM provider — current state (2026-09-01)
 
 Google locked new API keys to `gemini-3.6-flash` only (20 requests/day free) —
@@ -177,8 +231,7 @@ tables.** Until those land, TEXT-3 is blocked — do TEXT-4 first if so.
 Build order per `docs/voice/index.md`: VOICE-1 → (VOICE-2 ∥ VOICE-3) → VOICE-4.
 They all reuse TEXT-2's stateless `POST /conversations/{id}/messages` endpoint.
 
-- **VOICE-1** — push-to-talk mic capture (hold to record, release to send), mic-permission
-  handling, ignore empty/near-empty clips. Pure frontend, no API key needed.
+- **VOICE-1** — DONE (see the "DONE: VOICE-1" section above).
 - **VOICE-2** — captured audio → STT → transcript → the **same** `/messages` endpoint
   tagged `channel=voice`; set `transcription_confidence`; prompt retry on empty /
   low-confidence.
