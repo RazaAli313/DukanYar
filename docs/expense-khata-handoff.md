@@ -127,9 +127,42 @@ RLS uses `current_shop_id()`.
 
 ---
 
+## KHATA-1..4 data layer — DONE (routing-independent, 2026-09-02)
+
+`backend/app/services/khata.py` — customers + ledger, no HTTP/tool/UI.
+
+- `normalize_cnic(cnic)` — strips formatting, must be 13 digits (`KhataError` otherwise).
+- `register_customer(*, shop_id, name, cnic, created_by=None)` — DB trigger assigns the
+  per-shop running `khata_number`; blank name / bad CNIC → `KhataError`; CNIC already in
+  this shop → `DuplicateCustomerError` (carries the existing row). One retry on a
+  `khata_number` race.
+- `find_customer(*, shop_id, khata_number=None, cnic=None)` — khata# first, else CNIC
+  fallback, else `KhataError`. Shop-scoped. `None` if absent.
+- `customer_balance(*, shop_id, customer_id)` — `Σ udhaar − Σ payment` over
+  `ledger_entries`. Read-only. Partial repayment falls out naturally; overpay → negative.
+- `list_customers(*, shop_id, limit=50)` — customers + balance, newest khata# first.
+- `log_udhaar(*, shop_id, customer_id, amount, sale_id=None, created_by=None)` and
+  `record_payment(*, shop_id, customer_id, amount, created_by=None)` — insert a
+  `udhaar` / `payment` ledger row, return `{"entry": ..., "balance": <new>}`. Both
+  reject non-positive amounts **and** verify the customer belongs to `shop_id` before
+  inserting (`_assert_customer_in_shop`).
+- `reverse_ledger_entry(*, shop_id, entry_id)` — the KHATA-2 undo; shop-scoped delete.
+
+**KHATA-3 approval gate is NOT here** — `record_payment` is the post-approval action;
+`pending_approval` → approve/reject lives in TOOL-3 / orchestration.
+
+Cash vs credit (confirmed against SALE epic): a **cash sale records no customer** and
+never calls this module. Only a khata#-present (credit) sale creates a `ledger_entries`
+`udhaar` row, linked via `sale_id`. `log_udhaar` also works standalone (no `sale_id`).
+
+Tests: `backend/tests/test_khata.py` — 21 cases against the real project. `uv run pytest`
+(58 total with the expense suite).
+
 ## NEXT
 
-- **KHATA-1** — `customers` table (khata# unique per shop, CNIC, name) + typed
-  registration. Depends only on FND-2 / AUTH-3 — buildable without the TOOL epic.
-- Then: resolve B1, then TEXT-3 (needs B2), then EXP-3 / KHATA-4 read-only screens,
-  then a minimal TOOL layer for EXP-2 / KHATA-2/3.
+- Resolve **B1** (frontend dual-dir), then the block-vs-free-form decision, then wire
+  the EXP + KHATA data layers to endpoints + UI.
+- **TEXT-3** (needs B2 ✅ done) — message persistence; prerequisite for `tool_calls`
+  and the free-form orchestration path.
+- Minimal TOOL layer (or block endpoints) for EXP-2 / KHATA-2/3 / SALE-3.
+- **Ask Sheheryar:** confirm `public.current_shop_id()` is in a committed migration.
