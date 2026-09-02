@@ -1,0 +1,41 @@
+-- =====================================================================
+-- TEXT-3 — one conversation thread per shop
+-- =====================================================================
+-- STATUS: NOT YET APPLIED. Needs an ack from the migrations/FND owner
+-- before it is run, because it makes a product decision permanent at the
+-- schema level. See the consequences below.
+--
+-- WHAT
+--   Enforces the TEXT-3 design decision that a shop has exactly one
+--   conversation, created lazily on the first message and never closed
+--   (WhatsApp-style single thread, no session/thread concept). Without
+--   this index, two concurrent first-messages can create two rows and the
+--   shop's history silently splits in half.
+--
+-- CONSEQUENCES — read before applying
+--   1. This bakes "one conversation per shop, forever" into the schema.
+--      A future per-user or per-session thread model would have to drop
+--      this index first.
+--   2. public.conversations.user_id is NOT NULL and REFERENCES
+--      auth.users(id) ON DELETE CASCADE. Combined with one-row-per-shop,
+--      deleting the auth user who happened to send the first message
+--      deletes that row -- and therefore, via
+--      messages.conversation_id ON DELETE CASCADE, the shop's ENTIRE chat
+--      history for every user in that shop.
+--      If that is not acceptable, change conversations.user_id to
+--      ON DELETE SET NULL (it is already nullable in the ERD's intent)
+--      BEFORE applying this index.
+--
+-- SAFETY
+--   public.conversations is empty as of 2026-09-02, so the index cannot
+--   fail on existing duplicates. Additive only; touches no other object
+--   and no existing migration file.
+--
+-- AFTER APPLYING
+--   app.services.conversations.get_or_create_conversation() may be
+--   simplified to upsert(..., on_conflict="shop_id"). Until then it uses a
+--   deterministic order-by + limit, which is correct but not race-proof.
+-- =====================================================================
+
+CREATE UNIQUE INDEX IF NOT EXISTS conversations_shop_id_key
+  ON public.conversations (shop_id);

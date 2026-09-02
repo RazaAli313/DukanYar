@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     llm_model: str = ""
     # Provider-specific (Groq/Qwen: "none", Gemini 3: "minimal"); "" omits it
     llm_reasoning_effort: str = "none"
+    # TEXT-3: how many prior turns are replayed to the model. The thread itself
+    # is never truncated — this caps only what each request sends, so tokens and
+    # latency stay flat as the conversation grows.
+    llm_max_context_turns: int = 8
 
     # Voice STT (VOICE-2) — provider behind app.services.stt.transcribe()
     stt_provider: str = "speechmatics"  # "speechmatics" | "groq"

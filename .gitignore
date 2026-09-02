@@ -12,3 +12,5 @@ _*.pdf
 
 # supabase mcp server
 .mcp.json
+
+.env.local
