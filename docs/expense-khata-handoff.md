@@ -67,13 +67,42 @@ RLS policies (depend on a `public.current_shop_id()` helper Sheheryar added):
 
 ### Gaps / follow-ups
 
-1. **Drift:** get Sheheryar to commit his expense migration (tables + `current_shop_id()`
-   + policies + RLS enable) to `supabase/migrations/`.
-2. **Categories:** only `Uncategorized` is seeded. EXP-2's "bijli → utilities" inference
-   needs the rest. Add an additive migration seeding e.g. `utilities, rent, supplies,
-   salaries, transport, maintenance, other` once (1) is done.
-3. **EXP-2 / EXP-3 must target this schema:** `category_id` (uuid FK, nullable),
-   `expense_date` (not `spent_on`), `created_by`. RLS uses `current_shop_id()`.
+1. **Drift:** Sheheryar's full phase-3 SQL is now committed as
+   `supabase/migrations/20260902070905_sale_khata_exp_tool_admin_rpt.sql` (he ran it
+   in the dashboard first). Still open: confirm `public.current_shop_id()` lives in a
+   committed migration — it is referenced by every RLS policy but wasn't in the FND files.
+2. **Categories seeded** — `20260902171955_seed_expense_categories.sql` adds
+   `Utilities, Rent, Supplies, Salaries, Transport, Maintenance, Other` (applied to the
+   hosted DB). `Uncategorized` was already there.
+
+## EXP-2 / EXP-3 data layer — DONE (routing-independent, 2026-09-02)
+
+`backend/app/services/expenses.py` — no HTTP/tool/UI, just rows:
+
+- `resolve_category(name)` — exact name match → Roman-Urdu/English keyword map
+  (`bijli/gas/paani → Utilities`, `kiraya → Rent`, `tankhwah → Salaries`, ...) →
+  `Uncategorized` fallback.
+- `create_expense(*, shop_id, amount, category=None, note=None, expense_date=None,
+  created_by=None)` — rejects non-positive / non-numeric amount (`ExpenseError`),
+  resolves category, inserts, returns the row with the category **name**.
+- `get_expense`, `list_expenses(*, shop_id, limit=20)` (most-recent-first),
+  `delete_expense(*, shop_id, expense_id)` (the EXP-2 undo **and** EXP-3 delete —
+  same op, shop-scoped so another shop can't touch it).
+
+Backend uses the service_role key → RLS bypassed → **every function takes `shop_id`
+and scopes the query itself**.
+
+Tests: `backend/tests/test_expenses.py` — 16 cases against the real Supabase project
+(throwaway shop per test, CASCADE cleanup). `uv run pytest`.
+
+**Still out of scope** (waiting on the block-vs-free-form decision): HTTP endpoint,
+voice/text → fields parsing, frontend, `tool_calls` rows, orchestration, EXP-2 AC3
+(missing-amount clarification — that's orchestration-layer).
+
+### Note — column name
+
+The real column is **`expense_date`** (not `spent_on` as an earlier draft plan had it).
+RLS uses `current_shop_id()`.
 
 ### AC status
 
