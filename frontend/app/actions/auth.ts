@@ -1,105 +1,113 @@
-'use server'
+'use server';
 
-import { revalidatePath } from 'next/cache'
-import { redirect } from 'next/navigation'
-import { createClient } from '../../utils/supabase/server'
+import { redirect } from 'next/navigation';
+import { createClient } from '../../utils/supabase/server';
+import { createAdminClient } from '../../utils/supabase/admin';
 
-export async function signUp(formData: FormData) {
-  const supabase = await createClient()
+// ---------------------------------------------------------------------------
+// Sign In (login)
+// ---------------------------------------------------------------------------
 
-  const email = (formData.get('email') as string)?.trim().toLowerCase()
-  const password = formData.get('password') as string
-  const shopName = (formData.get('shopName') as string)?.trim()
+export async function signIn(formData: FormData) {
+  const supabase = await createClient();
 
-  if (!email || !password || !shopName) {
-    return { error: 'Email, password, and shop name are required.' }
+  const email = formData.get('email') as string;
+  const password = formData.get('password') as string;
+
+  const { error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
+
+  if (error) {
+    return { error: error.message };
   }
+
+  redirect('/app');
+}
+
+// ---------------------------------------------------------------------------
+// Sign Up (register)
+// ---------------------------------------------------------------------------
+
+export async function signUpAction(formData: FormData) {
+  const supabase = await createClient();
+  const adminSupabase = createAdminClient();
+
+  const email = formData.get('email') as string;
+  const password = formData.get('password') as string;
+  const shopName = formData.get('shopName') as string;
 
   // 1. Register User in Supabase Auth
   const { data: authData, error: authError } = await supabase.auth.signUp({
     email,
     password,
-  })
+  });
 
   if (authError || !authData.user) {
-    return { error: authError?.message || 'Failed to register user.' }
+    return { error: authError?.message || 'Failed to register user.' };
   }
 
-  const userId = authData.user.id
-
-  // 2. Insert new Shop into public.shops
-  const { data: shopData, error: shopError } = await supabase
+  // 2. Insert Shop record
+  const { data: shopData, error: shopError } = await adminSupabase
     .from('shops')
-    .insert([{ name: shopName }])
-    .select('id')
-    .single()
+    .insert({ name: shopName })
+    .select()
+    .single();
 
-  if (shopError || !shopData) {
-    console.error('Shop Insert Error:', shopError)
-    return { error: 'User created, but failed to create shop entry.' }
+  if (shopError) {
+    console.error('Shop creation error:', shopError);
+    return { error: 'Failed to create shop record.' };
   }
 
-  // 3. Insert user Metadata into public.profiles
-  const { error: profileError } = await supabase.from('profiles').insert([
-    {
-      id: userId,
-      shop_id: shopData.id,
+  // 3. Link profile to shop using upsert
+  const { error: profileError } = await adminSupabase
+    .from('profiles')
+    .upsert({
+      id: authData.user.id,
       email: email,
+      shop_id: shopData.id,
       role_name: 'shopkeeper',
-    },
-  ])
+    });
 
   if (profileError) {
-    console.error('Profile Insert Error:', profileError)
-    await supabase.from('shops').delete().eq('id', shopData.id)
-    return { error: 'Account created, but failed to set up user profile.' }
+    console.error('Profile linkage error:', profileError);
+    return { error: 'Failed to complete user profile creation.' };
   }
 
-  revalidatePath('/', 'layout')
-  redirect('/app')
+  redirect('/login');
 }
 
-export async function signIn(formData: FormData) {
-  const supabase = await createClient()
+/** Alias so pages can import either `signUpAction` or `signUp`. */
+export { signUpAction as signUp };
 
-  const email = (formData.get('email') as string)?.trim().toLowerCase()
-  const password = formData.get('password') as string
-
-  if (!email || !password) {
-    return { error: 'Email and password are required.' }
-  }
-
-  const { error } = await supabase.auth.signInWithPassword({
-    email,
-    password,
-  })
-
-  if (error) {
-    return { error: error.message }
-  }
-
-  revalidatePath('/', 'layout')
-  redirect('/app')
-}
-
-export async function signOut() {
-  const supabase = await createClient()
-  await supabase.auth.signOut()
-  revalidatePath('/', 'layout')
-  redirect('/login')
-}
+// ---------------------------------------------------------------------------
+// Get User Profile (dashboard)
+// ---------------------------------------------------------------------------
 
 export async function getUserProfile() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const supabase = await createClient();
 
-  if (!user) return null
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
 
-  const { data: profile } = await supabase
+  const { data: profile, error } = await supabase
     .from('profiles')
-    .select('*, shops(*)')
+    .select('*, shops(id, name, address)')
     .eq('id', user.id)
-    .single()
+    .single();
 
-  return profile
+  if (error || !profile) return null;
+
+  return { ...profile, email: user.email ?? profile.email };
+}
+
+// ---------------------------------------------------------------------------
+// Sign Out
+// ---------------------------------------------------------------------------
+
+export async function signOut() {
+  const supabase = await createClient();
+  await supabase.auth.signOut();
+  redirect('/login');
 }
