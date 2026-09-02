@@ -23,7 +23,13 @@ function toTurns(messages: Message[]): { role: "user" | "assistant"; content: st
     }));
 }
 
-export function ChatScreen() {
+export interface ChatScreenProps {
+  shopName?: string;
+  userEmail?: string;
+  onSignOut?: () => void | Promise<void>;
+}
+
+export function ChatScreen({ shopName, userEmail, onSignOut }: ChatScreenProps = {}) {
   const [messages, setMessages] = useState<Message[]>([]);
   // One conversation ID per tab session — stable across messages.
   const [conversationId] = useState(() => generateId());
@@ -252,7 +258,7 @@ export function ChatScreen() {
         <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-800/40 bg-[var(--surface)] px-4">
           <div className="flex items-center gap-3">
             <h1 className="text-[1.0625rem] font-semibold tracking-tight text-slate-100">
-              DukanYar
+              {shopName || "DukanYar"}
             </h1>
             <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-800/70 px-2.5 py-0.5 text-[0.6875rem] font-medium text-slate-400">
               <span className="relative flex h-1.5 w-1.5">
@@ -263,25 +269,39 @@ export function ChatScreen() {
             </span>
           </div>
 
-          <button
-            onClick={() => {
-              setSpeakReplies((on) => {
-                if (on) speech.stop();
-                return !on;
-              });
-            }}
-            aria-pressed={speakReplies}
-            aria-label={
-              speakReplies ? "Awaaz band karein" : "Awaaz chaalu karein"
-            }
-            className={`flex h-8 w-8 items-center justify-center rounded-full text-base transition-colors ${
-              speakReplies
-                ? "bg-emerald-500/15 text-emerald-300"
-                : "bg-slate-800 text-slate-500"
-            }`}
-          >
-            {speakReplies ? "🔊" : "🔇"}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setSpeakReplies((on) => {
+                  if (on) speech.stop();
+                  return !on;
+                });
+              }}
+              aria-pressed={speakReplies}
+              aria-label={
+                speakReplies ? "Awaaz band karein" : "Awaaz chaalu karein"
+              }
+              className={`flex h-8 w-8 items-center justify-center rounded-full text-base transition-colors ${
+                speakReplies
+                  ? "bg-emerald-500/15 text-emerald-300"
+                  : "bg-slate-800 text-slate-500"
+              }`}
+            >
+              {speakReplies ? "🔊" : "🔇"}
+            </button>
+
+            {onSignOut && (
+              <form action={onSignOut}>
+                <button
+                  type="submit"
+                  title={userEmail ? `Sign out (${userEmail})` : "Sign out"}
+                  className="rounded-md border border-slate-800 bg-slate-900/80 px-2.5 py-1 text-xs font-medium text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                >
+                  Sign Out
+                </button>
+              </form>
+            )}
+          </div>
         </header>
 
         {/* ── Thread (scrollable) ───────────────────────────── */}
