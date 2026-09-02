@@ -9,7 +9,7 @@ export interface SaleItemInput {
 export interface RecordSaleParams {
   shop_id: string;
   customer_id?: string | null;
-  payment_type: 'cash' | 'udhaar' | 'split';
+  payment_type: 'cash' | 'udhaar';
   total_amount: number; // Stated total primacy (SALE-3)
   created_by?: string;
   items: SaleItemInput[];
@@ -96,7 +96,7 @@ export async function recordSale(
   }
 
   // 3. Handle Udhaar / Ledger Entry
-  if ((payment_type === 'udhaar' || payment_type === 'split') && customer_id) {
+  if (payment_type === 'udhaar' && customer_id) {
     const { error: ledgerErr } = await supabase.from('ledger_entries').insert({
       shop_id,
       customer_id,

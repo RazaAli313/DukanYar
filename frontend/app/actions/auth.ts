@@ -1,8 +1,34 @@
 'use server';
 
-// Use relative paths instead of '@/' path aliases
+import { redirect } from 'next/navigation';
 import { createClient } from '../../utils/supabase/server';
 import { createAdminClient } from '../../utils/supabase/admin';
+
+// ---------------------------------------------------------------------------
+// Sign In (login)
+// ---------------------------------------------------------------------------
+
+export async function signIn(formData: FormData) {
+  const supabase = await createClient();
+
+  const email = formData.get('email') as string;
+  const password = formData.get('password') as string;
+
+  const { error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  redirect('/app');
+}
+
+// ---------------------------------------------------------------------------
+// Sign Up (register)
+// ---------------------------------------------------------------------------
 
 export async function signUpAction(formData: FormData) {
   const supabase = await createClient();
@@ -46,5 +72,39 @@ export async function signUpAction(formData: FormData) {
     return { error: 'Failed to complete user profile creation.' };
   }
 
-  return { success: true };
+  redirect('/login');
+}
+
+/** Alias so pages can import either `signUpAction` or `signUp`. */
+export { signUpAction as signUp };
+
+// ---------------------------------------------------------------------------
+// Get User Profile (dashboard)
+// ---------------------------------------------------------------------------
+
+export async function getUserProfile() {
+  const supabase = await createClient();
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  const { data: profile, error } = await supabase
+    .from('profiles')
+    .select('*, shops(id, name, address)')
+    .eq('id', user.id)
+    .single();
+
+  if (error || !profile) return null;
+
+  return { ...profile, email: user.email ?? profile.email };
+}
+
+// ---------------------------------------------------------------------------
+// Sign Out
+// ---------------------------------------------------------------------------
+
+export async function signOut() {
+  const supabase = await createClient();
+  await supabase.auth.signOut();
+  redirect('/login');
 }

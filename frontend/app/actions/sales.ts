@@ -1,23 +1,26 @@
 'use server'
 
 import { createClient } from '../../utils/supabase/server';
-import { resolveProduct, ProductMatch } from '../../src/lib/sales/catalogService';
+import { resolveProduct, ResolveResult } from '../../src/lib/sales/catalogService';
 import { recordSale, RecordSaleParams, StockAlert } from '../../src/lib/sales/salesService';
 
 /**
- * Server Action: Search or resolve product by name or alias (SALE-2)
+ * Server Action: Resolve product by name or alias (SALE-2).
+ * Returns { match } when unambiguous, { candidates } when ambiguous,
+ * or both empty when no product found.
  */
 export async function resolveProductAction(searchTerm: string): Promise<{
   success: boolean;
-  data?: ProductMatch | null;
+  data?: ResolveResult;
   error?: string;
 }> {
   try {
     const supabase = await createClient();
-    const match = await resolveProduct(supabase, searchTerm);
-    return { success: true, data: match };
-  } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to resolve product' };
+    const result = await resolveProduct(supabase, searchTerm);
+    return { success: true, data: result };
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'An error occurred';
+    return { success: false, error: errorMessage };
   }
 }
 
@@ -69,7 +72,8 @@ export async function processSaleAction(params: Omit<RecordSaleParams, 'shop_id'
       stock_alerts: result.stock_alerts,
       warning_message: warningMessage,
     };
-  } catch (err: any) {
-    return { success: false, error: err.message || 'Failed to process sale' };
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'An error occurred';
+    return { success: false, error: errorMessage };
   }
 }
