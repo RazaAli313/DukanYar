@@ -3,9 +3,11 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '../../utils/supabase/server'
+import { createAdminClient } from '../../utils/supabase/admin'
 
 export async function signUp(formData: FormData) {
   const supabase = await createClient()
+  const adminSupabase = createAdminClient()
 
   const email = (formData.get('email') as string)?.trim().toLowerCase()
   const password = formData.get('password') as string
@@ -27,20 +29,20 @@ export async function signUp(formData: FormData) {
 
   const userId = authData.user.id
 
-  // 2. Insert new Shop into public.shops
-  const { data: shopData, error: shopError } = await supabase
+  // 2. Insert new Shop into public.shops using Admin Client (Bypasses RLS)
+  const { data: shopData, error: shopError } = await adminSupabase
     .from('shops')
-    .insert([{ name: shopName }])
-    .select('id')
+    .insert({ name: shopName })
+    .select()
     .single()
 
-  if (shopError || !shopData) {
-    console.error('Shop Insert Error:', shopError)
+  if (shopError) {
+    console.error('SERVER ACTION ERROR (SHOPS):', shopError)
     return { error: 'User created, but failed to create shop entry.' }
   }
 
-  // 3. Insert user Metadata into public.profiles
-  const { error: profileError } = await supabase.from('profiles').insert([
+  // 3. Insert user Metadata into public.profiles using Admin Client
+  const { error: profileError } = await adminSupabase.from('profiles').insert([
     {
       id: userId,
       shop_id: shopData.id,
@@ -50,8 +52,8 @@ export async function signUp(formData: FormData) {
   ])
 
   if (profileError) {
-    console.error('Profile Insert Error:', profileError)
-    await supabase.from('shops').delete().eq('id', shopData.id)
+    console.error('SERVER ACTION ERROR (PROFILES):', profileError)
+    await adminSupabase.from('shops').delete().eq('id', shopData.id)
     return { error: 'Account created, but failed to set up user profile.' }
   }
 
