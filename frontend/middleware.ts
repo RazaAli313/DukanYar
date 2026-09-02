@@ -29,14 +29,14 @@ export async function middleware(request: NextRequest) {
   if (user) {
     const { data: profile } = await supabase
       .from('profiles')
-      .select('role')
+      .select('role_name')
       .eq('id', user.id)
       .single()
 
-    if (path.startsWith('/admin') && profile?.role !== 'admin') {
+    if (path.startsWith('/admin') && profile?.role_name !== 'admin') {
       return NextResponse.redirect(new URL('/app', request.url))
     }
-    if (path.startsWith('/app') && profile?.role === 'admin') {
+    if (path.startsWith('/app') && profile?.role_name === 'admin') {
       return NextResponse.redirect(new URL('/admin', request.url))
     }
   }
