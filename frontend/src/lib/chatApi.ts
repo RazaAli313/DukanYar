@@ -1,108 +1,130 @@
 /**
- * Chat API layer — TEXT-2 real implementation.
+ * Chat API — talks to the FastAPI backend's conversation endpoint.
  *
- * Calls POST /conversations/{id}/messages and streams the reply via SSE.
- * The component layer wires onDelta/onComplete callbacks for progressive rendering.
+ * Every call carries the shopkeeper's Supabase access token; the backend
+ * resolves their shop from it (see backend/app/auth.py). The conversation is
+ * the shop's single thread — its id is discovered from the SSE `meta` event,
+ * never sent by the client.
  */
+
+import { createClient } from "../../utils/supabase/client";
+import type { Channel, Message, Sender } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
-/** Client-side timeout for the entire streaming request (ms). */
-const STREAM_TIMEOUT_MS = 30_000;
+/** Abort a stream that goes quiet for this long. */
+const STREAM_TIMEOUT_MS = 45_000;
 
-/** Maximum prior turns sent to the LLM as context. */
-export const MAX_RECENT_TURNS = 20;
+/** Which record flow the shopkeeper picked on the dashboard. */
+export type Mode = "sale" | "udhaar" | "kharcha" | "ask";
 
-interface Turn {
-  role: "user" | "assistant";
-  content: string;
+/** Structured result of a tool the assistant ran (TOOL-4 / SALE-3). */
+export interface ActionCard {
+  kind: "sale" | "udhaar" | "kharcha";
+  status: "proposed" | "recorded" | "failed";
+  title: string;
+  lines: { label: string; value: string; muted?: boolean; flag?: boolean }[];
+  total?: string;
+  note?: string;
 }
 
-/** Origin of the message being sent — the backend tags it on the turn (VOICE-2). */
-export type Channel = "text" | "voice";
-
-interface StreamCallbacks {
-  /** Called for each incremental text delta. */
+interface StreamHandlers {
+  /** Delivered before the first delta: the shop's conversation id, and the
+   *  message as it was stored (voice transcripts are romanised server-side). */
+  onMeta?: (meta: { conversationId: string; userText?: string }) => void;
   onDelta: (delta: string) => void;
-  /** Called once when the stream finishes successfully. */
+  /** A tool proposed or executed an action. */
+  onAction?: (action: ActionCard) => void;
   onComplete: () => void;
 }
 
-/**
- * Send a user message to the backend and stream the assistant reply.
- *
- * @throws {Error} on HTTP errors, network failures, or mid-stream error events.
- */
+async function authHeader(): Promise<Record<string, string>> {
+  const supabase = createClient();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session) throw new Error("Aap login nahi hain. Dobara login karein.");
+  return { Authorization: `Bearer ${session.access_token}` };
+}
+
+// ── send a message, stream the reply ─────────────────────────────────────────
+
 export async function sendMessage(
-  conversationId: string,
+  mode: Mode,
   text: string,
-  recentTurns: Turn[],
-  callbacks: StreamCallbacks,
+  handlers: StreamHandlers,
   channel: Channel = "text",
+  transcriptionConfidence?: number,
 ): Promise<void> {
-  // Abort the request if no response arrives within the timeout.
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
+  let timer = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
 
   try {
-    const res = await fetch(
-      `${API_BASE}/conversations/${conversationId}/messages`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, recent_turns: recentTurns, channel }),
-        signal: controller.signal,
+    const res = await fetch(`${API_BASE}/conversations/active/messages`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(await authHeader()),
       },
-    );
+      body: JSON.stringify({
+        text,
+        channel,
+        mode,
+        transcription_confidence: transcriptionConfidence ?? null,
+      }),
+      signal: controller.signal,
+    });
 
     if (!res.ok) {
       const detail = await res.text().catch(() => res.statusText);
-      throw new Error(detail || `HTTP ${res.status}`);
+      throw new Error(humanError(res.status, detail));
     }
 
     const reader = res.body?.getReader();
-    if (!reader) throw new Error("Response body is not readable");
+    if (!reader) throw new Error("Reply stream nahi mila");
 
     const decoder = new TextDecoder();
     let buffer = "";
 
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
+    for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      // Reset the timeout on every chunk — the stream is alive.
       clearTimeout(timer);
+      timer = setTimeout(() => controller.abort(), STREAM_TIMEOUT_MS);
 
       buffer += decoder.decode(value, { stream: true });
-
-      // Split on double-newline; the last segment is potentially incomplete —
-      // keep it in the buffer for the next read.
       const parts = buffer.split("\n\n");
       buffer = parts.pop() ?? "";
 
       for (const raw of parts) {
-        const event = parseSseEvent(raw);
-        if (!event) continue;
+        const evt = parseSse(raw);
+        if (!evt) continue;
 
-        switch (event.type) {
+        switch (evt.type) {
+          case "meta": {
+            const m = evt.data as { conversation_id: string; user_text?: string };
+            handlers.onMeta?.({ conversationId: m.conversation_id, userText: m.user_text });
+            break;
+          }
           case "delta":
-            callbacks.onDelta((event.data as { text: string }).text);
+            handlers.onDelta((evt.data as { text: string }).text);
+            break;
+          case "action":
+            handlers.onAction?.(evt.data as ActionCard);
             break;
           case "error":
-            throw new Error((event.data as { detail: string }).detail);
+            throw new Error((evt.data as { detail: string }).detail);
           case "done":
-            callbacks.onComplete();
+            handlers.onComplete();
             return;
         }
       }
     }
-
-    // Stream ended without a `done` event — treat as an error.
-    throw new Error("Stream ended unexpectedly");
+    throw new Error("Reply adhoori reh gayi. Dobara koshish karein.");
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
-      throw new Error("Request timed out. Please try again.");
+      throw new Error("Bahut der ho gayi. Dobara koshish karein.");
     }
     throw err;
   } finally {
@@ -110,31 +132,69 @@ export async function sendMessage(
   }
 }
 
-// ── SSE parser ────────────────────────────────────────────────────────────────
+// ── load the shop's thread ───────────────────────────────────────────────────
+
+interface HistoryRow {
+  id: string;
+  role: Sender;
+  content: string;
+  channel: Channel | null;
+  status: string | null;
+  transcription_confidence: number | null;
+  created_at: string;
+}
+
+export async function loadHistory(
+  limit = 30,
+): Promise<{ conversationId: string | null; messages: Message[] }> {
+  const res = await fetch(`${API_BASE}/conversations/history?limit=${limit}`, {
+    headers: await authHeader(),
+  });
+  if (!res.ok) {
+    throw new Error(humanError(res.status, await res.text().catch(() => "")));
+  }
+  const body = (await res.json()) as {
+    conversation_id: string | null;
+    messages: HistoryRow[];
+  };
+  return {
+    conversationId: body.conversation_id,
+    messages: body.messages.map((r) => ({
+      id: r.id,
+      sender: r.role,
+      text: r.content,
+      status: r.status === "failed" ? "error" : "complete",
+      createdAt: new Date(r.created_at),
+      channel: r.channel ?? undefined,
+    })),
+  };
+}
+
+// ── helpers ──────────────────────────────────────────────────────────────────
 
 interface SseEvent {
   type: string;
   data: unknown;
 }
 
-function parseSseEvent(raw: string): SseEvent | null {
-  let eventType = "message";
-  let dataStr = "";
-
+function parseSse(raw: string): SseEvent | null {
+  let type = "message";
+  let data = "";
   for (const line of raw.split("\n")) {
-    if (line.startsWith("event:")) {
-      eventType = line.slice(6).trim();
-    } else if (line.startsWith("data:")) {
-      dataStr += line.slice(5).trim();
-    }
-    // Ignore id / retry / comment lines
+    if (line.startsWith("event:")) type = line.slice(6).trim();
+    else if (line.startsWith("data:")) data += line.slice(5).trim();
   }
-
-  if (!dataStr) return null;
-
+  if (!data) return null;
   try {
-    return { type: eventType, data: JSON.parse(dataStr) };
+    return { type, data: JSON.parse(data) };
   } catch {
     return null;
   }
+}
+
+function humanError(status: number, detail: string): string {
+  if (status === 401) return "Session khatam ho gaya. Dobara login karein.";
+  if (status === 403) return "Is dukaan ka access nahi.";
+  if (status === 502) return "AI abhi jawab nahi de pa raha. Thodi der baad koshish karein.";
+  return detail || `Error ${status}`;
 }

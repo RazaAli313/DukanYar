@@ -67,14 +67,11 @@ def auth_user(shop_id):
     user_id = created.user.id
 
     try:
-        sb.table("profiles").insert(
-            {
-                "id": user_id,
-                "shop_id": shop_id,
-                "email": email,
-                "role_name": "shopkeeper",
-            }
-        ).execute()
+        # A DB trigger (handle_new_user) already inserted the profile row with
+        # id + email + role; we just attach the shop.
+        sb.table("profiles").update(
+            {"shop_id": shop_id, "email": email, "role_name": "shopkeeper"}
+        ).eq("id", user_id).execute()
         yield {
             "id": user_id,
             "email": email,
@@ -83,7 +80,10 @@ def auth_user(shop_id):
         }
     finally:
         # Deleting the auth user cascades to public.profiles (FK on profiles.id).
-        sb.auth.admin.delete_user(user_id)
+        try:
+            sb.auth.admin.delete_user(user_id)
+        except Exception:
+            pass
 
 
 @pytest.fixture

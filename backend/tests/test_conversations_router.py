@@ -29,7 +29,7 @@ def fake_llm(monkeypatch, captured):
     """Replace the model with a scripted stream. Returns a configure callable."""
 
     def configure(deltas=("acha ", "ji"), fail_with=None):
-        async def stream_reply(turns, channel="text"):
+        async def stream_reply(turns, channel="text", mode=None):
             captured["turns"] = list(turns)
             captured["channel"] = channel
             for d in deltas:

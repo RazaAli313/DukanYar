@@ -52,7 +52,7 @@ def test_scheme_is_case_insensitive(access_token, auth_user):
 # ── authenticated but not onboarded ──────────────────────────────────────────
 
 def test_403_when_user_has_no_profile(shop_id):
-    """A signed-up user whose profile insert never landed cannot be scoped."""
+    """A user whose profile row is missing entirely cannot be scoped."""
     import uuid
 
     from app.db import get_supabase
@@ -63,6 +63,9 @@ def test_403_when_user_has_no_profile(shop_id):
         {"email": email, "password": "dukanyar-test-passw0rd!", "email_confirm": True}
     )
     try:
+        # The handle_new_user trigger auto-creates a profile — delete it so this
+        # user genuinely has none.
+        sb.table("profiles").delete().eq("id", created.user.id).execute()
         session = sb.auth.sign_in_with_password(
             {"email": email, "password": "dukanyar-test-passw0rd!"}
         )
@@ -74,7 +77,10 @@ def test_403_when_user_has_no_profile(shop_id):
             sb.auth.sign_out()
         except Exception:
             pass
-        sb.auth.admin.delete_user(created.user.id)
+        try:
+            sb.auth.admin.delete_user(created.user.id)
+        except Exception:
+            pass
 
 
 def test_403_when_profile_has_no_shop():
@@ -89,9 +95,7 @@ def test_403_when_profile_has_no_shop():
         {"email": email, "password": "dukanyar-test-passw0rd!", "email_confirm": True}
     )
     try:
-        sb.table("profiles").insert(
-            {"id": created.user.id, "email": email, "role_name": "shopkeeper"}
-        ).execute()
+        # Trigger already made the profile with shop_id NULL — no insert needed.
         session = sb.auth.sign_in_with_password(
             {"email": email, "password": "dukanyar-test-passw0rd!"}
         )
@@ -103,4 +107,7 @@ def test_403_when_profile_has_no_shop():
             sb.auth.sign_out()
         except Exception:
             pass
-        sb.auth.admin.delete_user(created.user.id)
+        try:
+            sb.auth.admin.delete_user(created.user.id)
+        except Exception:
+            pass
