@@ -18,9 +18,9 @@ admin capability, via owned views/service endpoints — never a shopkeeper capab
 
 | ID | Name | Status | Build Engineer | QA | DM |
 | :---- | :---- | :---- | :---- | :---- | :---- |
-| ADMIN-1 | Shops & users management | To Be Done | TBD | TBD | TBD |
-| ADMIN-2 | Voice & transcription monitoring | To Be Done | TBD | TBD | TBD |
-| ADMIN-3 | Audit log & system health | To Be Done | TBD | TBD | TBD |
+| ADMIN-1 | Shops & users management | Done | Antigravity | TBD | TBD |
+| ADMIN-2 | Voice & transcription monitoring | Done | Antigravity | TBD | TBD |
+| ADMIN-3 | Audit log & system health | Done | Antigravity | TBD | TBD |
 | **Total** |  |  | **TBD** | **TBD** | **TBD** |
 
 <!--

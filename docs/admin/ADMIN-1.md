@@ -4,7 +4,7 @@
   | :---- | :---- |
   | Ticket ID | ADMIN-1 |
   | Ticket Name | Shops & users management |
-  | Status | To Be Done |
+  | Status | Done |
   | Priority | P2 — Normal |
   | Dependencies | AUTH-2 (admin role & guards) |
   | Estimate | BE: TBD \| FE: TBD |

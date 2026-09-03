@@ -4,7 +4,7 @@
 | :---- | :---- |
 | Ticket ID | ADMIN-3 |
 | Ticket Name | Audit log & system health |
-| Status | To Be Done |
+| Status | Done |
 | Priority | P3 — Low |
 | Dependencies | AUTH-2 (admin role), FND-2 (audit table) |
 | Estimate | BE: TBD \| FE: TBD |

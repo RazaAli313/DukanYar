@@ -4,7 +4,7 @@
 | :---- | :---- |
 | Ticket ID | ADMIN-2 |
 | Ticket Name | Voice & transcription monitoring |
-| Status | To Be Done |
+| Status | Done |
 | Priority | P2 — Normal |
 | Dependencies | AUTH-2 (admin role), VOICE-2 (transcripts), TOOL-2 (actions) |
 | Estimate | BE: TBD \| FE: TBD |
