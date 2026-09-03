@@ -108,6 +108,9 @@ Every epic folder has an `index.md` (parent) listing its child tickets, plus one
 Prefixes: `FND`, `TEXT`, `VOICE`, `AUTH`.
 
 **Sources** for all Phase-1 scope: stakeholder grilling session (this project's
-scoping conversation) and Alibaba Cloud AI Hackathon 2026 constraints (deploy on
-Alibaba Cloud, use Qwen models, open-source repo). No estimates have been guessed;
+scoping conversation) and Alibaba Cloud AI Hackathon 2026 (open-source repo). Any
+tools, models, and providers may be used — there is no requirement to use Qwen or
+to deploy on Alibaba Cloud; model/provider choices are made per pillar on quality,
+latency, and cost (see the VOICE tickets for the STT/TTS provider adapter). No
+estimates have been guessed;
 `TBD` means "fill in at estimation."

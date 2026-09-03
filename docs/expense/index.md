@@ -17,7 +17,7 @@ MVP-light, commit + undo, same voice pattern as sales.
 
 | ID | Name | Status | Build Engineer | QA | DM |
 | :---- | :---- | :---- | :---- | :---- | :---- |
-| EXP-1 | Expenses schema & categories | To Be Done | TBD | TBD | TBD |
+| EXP-1 | Expenses schema & categories | Done (in DB) | Sheheryar | TBD | TBD |
 | EXP-2 | Log-expense tool (commit + undo) | To Be Done | TBD | TBD | TBD |
 | EXP-3 | Expense list & review | To Be Done | TBD | TBD | TBD |
 | **Total** |  |  | **TBD** | **TBD** | **TBD** |

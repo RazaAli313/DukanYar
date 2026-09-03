@@ -4,7 +4,7 @@
 | :---- | :---- |
 | Ticket ID | TEXT-1 |
 | Ticket Name | Chat input UI |
-| Status | To Be Done |
+| Status | Done |
 | Priority | P1 — High |
 | Dependencies | FND-3 (app shell) |
 | Estimate | BE: TBD \| FE: TBD |

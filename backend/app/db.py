@@ -1,15 +1,21 @@
-"""Database access — STUB.
+"""Supabase client for the backend.
 
-Sheheryar owns the real Supabase client + `conversations` / `messages` tables
-and their migrations. This placeholder exists only so feature code has something
-to import. Replace `get_supabase()` with the real client; keep the name.
+The backend uses the **service_role** key, so it bypasses RLS — every query
+MUST filter by the caller's shop_id explicitly (see app.auth.get_current_user).
 """
+
+from functools import lru_cache
+
+from supabase import Client, create_client
 
 from app.config import settings
 
 
-def get_supabase():
-    raise NotImplementedError(
-        "Supabase client not wired yet — Sheheryar's scaffold/auth work. "
-        f"(supabase_url set: {bool(settings.supabase_url)})"
-    )
+@lru_cache
+def get_supabase() -> Client:
+    if not settings.supabase_url or not settings.supabase_key:
+        raise RuntimeError(
+            "SUPABASE_URL / SUPABASE_KEY not set in backend/.env "
+            "(use the project URL + service_role key)."
+        )
+    return create_client(settings.supabase_url, settings.supabase_key)

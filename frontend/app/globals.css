@@ -1,3 +1,179 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ── DukanYar theme — warm paper + ledger green ──────────────────────
+   The visual language of a cloth-bound bahi khata: cream pages, deep ink,
+   a single restrained green. Not a blue SaaS dashboard. */
+:root {
+  --radius: 0.75rem;
+
+  --background: #f6f2e9;          /* warm cream / paper */
+  --foreground: #23201a;          /* deep ink */
+
+  --card: #fffdf7;               /* a fresh page */
+  --card-foreground: #23201a;
+  --popover: #fffdf7;
+  --popover-foreground: #23201a;
+
+  --primary: #2c6e49;            /* ledger green */
+  --primary-foreground: #f6f2e9;
+
+  --secondary: #ece5d5;          /* muted cream */
+  --secondary-foreground: #3a362d;
+
+  --muted: #ece5d5;
+  --muted-foreground: #7c7563;   /* warm grey */
+
+  --accent: #e3ede4;            /* pale green wash */
+  --accent-foreground: #234b37;
+
+  --destructive: #b5462f;       /* rust — money warnings, not alarm red */
+  --destructive-foreground: #fdf6ef;
+
+  --border: #e4dbc9;
+  --input: #e4dbc9;
+  --ring: #2c6e49;
+
+  /* low-stock / caution surface (soft terracotta wash) */
+  --caution: #f4e5db;
+  --caution-foreground: #8a4b2f;
+
+  /* money movement */
+  --credit: #2c6e49;           /* money in / cash */
+  --debit: #b5462f;            /* udhaar / money out */
+
+  --chart-1: #2c6e49;
+  --chart-2: #c9a227;
+  --chart-3: #8a4b2f;
+  --chart-4: #4f7d5e;
+  --chart-5: #a8763e;
+
+  --sidebar: #fffdf7;
+  --sidebar-foreground: #23201a;
+  --sidebar-primary: #2c6e49;
+  --sidebar-primary-foreground: #f6f2e9;
+  --sidebar-accent: #ece5d5;
+  --sidebar-accent-foreground: #3a362d;
+  --sidebar-border: #e4dbc9;
+  --sidebar-ring: #2c6e49;
+}
+
+.dark {
+  --background: #1c1a15;
+  --foreground: #ece5d5;
+  --card: #24211a;
+  --card-foreground: #ece5d5;
+  --popover: #24211a;
+  --popover-foreground: #ece5d5;
+  --primary: #6bbf8f;
+  --primary-foreground: #14261c;
+  --secondary: #2e2a20;
+  --secondary-foreground: #ded6c4;
+  --muted: #2e2a20;
+  --muted-foreground: #a89f8a;
+  --accent: #2a3a2f;
+  --accent-foreground: #cfe6d5;
+  --destructive: #e07a5f;
+  --destructive-foreground: #1c1a15;
+  --border: #35312741;
+  --input: #3a3529;
+  --ring: #6bbf8f;
+  --caution: #3a2c22;
+  --caution-foreground: #e6b48f;
+  --credit: #6bbf8f;
+  --debit: #e07a5f;
+  --sidebar: #24211a;
+  --sidebar-foreground: #ece5d5;
+  --sidebar-primary: #6bbf8f;
+  --sidebar-primary-foreground: #14261c;
+  --sidebar-accent: #2e2a20;
+  --sidebar-accent-foreground: #ded6c4;
+  --sidebar-border: #353127;
+  --sidebar-ring: #6bbf8f;
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-caution: var(--caution);
+  --color-caution-foreground: var(--caution-foreground);
+  --color-credit: var(--credit);
+  --color-debit: var(--debit);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-fraunces), ui-serif, Georgia, serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  /* Amounts read as a ledger column — aligned, even-width digits. */
+  .tabular-nums,
+  .amount {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+}
+
+/* ── Motion ──────────────────────────────────────────────────────── */
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes typingBounce {
+  0%, 60%, 100% { transform: translateY(0);   opacity: 0.4; }
+  30%           { transform: translateY(-4px); opacity: 1;   }
+}
+
+/* ── Scrollbar — thin, warm ──────────────────────────────────────── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--muted-foreground); }

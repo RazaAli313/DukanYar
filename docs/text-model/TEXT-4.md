@@ -4,7 +4,7 @@
 | :---- | :---- |
 | Ticket ID | TEXT-4 |
 | Ticket Name | Urdu / Roman / English handling & assistant persona |
-| Status | To Be Done |
+| Status | Done |
 | Priority | P1 — High |
 | Dependencies | TEXT-2 (model integration) |
 | Estimate | BE: TBD \| FE: TBD |

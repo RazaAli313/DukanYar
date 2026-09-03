@@ -2,7 +2,7 @@
 
 **Owner:** Usman (Muhammad Usman Tariq)
 **Branch:** `feat/text-voice-module` → PR against `develop` (Raza reviews & merges)
-**Last updated:** 2026-08-31
+**Last updated:** 2026-09-02 (TEXT-3 backend done — persistence, auth dependency, history endpoint; UI integration split out as TEXT-5)
 **Module scope:** the TEXT pillar (TEXT-1..4) and the VOICE pillar (VOICE-1..4).
 Tickets: `docs/text-model/`, `docs/voice/`. Read each ticket's `.md` +
 `user-stories.md` + `index.md` before starting it.
@@ -84,54 +84,380 @@ cd frontend && npm install && cp .env.example .env.local && npm run dev
 
 ---
 
-## NEXT: TEXT-1 — Chat input UI (not started)
+## DONE: TEXT-1 — Chat input UI
 
-UI only, built against a **stubbed** reply (per `index.md` build order). React state
-only — no persistence (that's TEXT-3).
+Frontend-only chat screen at `/`. All state is React-local, no persistence.
 
-Acceptance criteria (`docs/text-model/TEXT-1.md`):
-- Submit a typed message → appears as a "user" bubble; input clears, ready for next.
-- Assistant reply arrives → appears as an "assistant" bubble beneath it.
-- While waiting → visible pending indicator until reply or error.
-- Urdu-script message renders right-to-left and stays readable.
+**Files created:**
+```
+frontend/src/lib/types.ts             Message, Sender, MessageStatus types
+frontend/src/lib/rtl.ts               isRtl() per-bubble Arabic-script detection
+frontend/src/lib/chatApi.ts           sendMessage() stub — TEXT-2 swap point
+frontend/src/components/chat/
+  ChatScreen.tsx                      Main view (h-dvh, centered 720px column)
+  ChatThread.tsx                      Scrollable message list + empty state
+  ChatBubble.tsx                      User/assistant bubbles, RTL, timestamps
+  ChatInput.tsx                       <form> Enter-to-send, arrow-up icon button
+  PendingIndicator.tsx                Staggered bouncing dots
+```
 
-### 5 open decisions (were pending when handed off — pick before coding)
+**5 decisions resolved:** frontend stub (`setTimeout` + canned), route `/`, per-message
+RTL auto-detect, dark theme (slate-900 + emerald), Roman-Urdu UI copy.
 
-| # | Question | Recommended default |
-| --- | --- | --- |
-| 1 | Where is the stub reply? | Pure frontend stub (`setTimeout` + canned reply), structured so TEXT-2 swaps in the real API call. No backend yet. |
-| 2 | Route for the chat screen | `/` (home) — app is single-purpose, voice-first |
-| 3 | RTL handling | Per-message auto-detect: if the text contains Arabic-script chars, set that bubble's `dir="rtl"`. Better for code-switching than a whole-app flip. |
-| 4 | Theme | Dark, echoing the mockup (`mockups/dukanyaar-mockup.html`: slate-900 + emerald accents) for later consistency |
-| 5 | UI copy language (placeholder, send button, errors) | Roman-Urdu (e.g. "Apna message likhein…", "Bhejein") |
-
-The mockup is a **POS dashboard** prototype, not a chat UI — no direct design
-reference for the chat thread; use it only for palette/tone.
+`next build` passes clean.
 
 ---
 
-## Then, in order
+## DONE: TEXT-2 — Model integration & streaming reply
 
-- **TEXT-2** — `POST /conversations/{id}/messages` in FastAPI. LLM call behind
-  `app/services/llm.py` (Gemini now / Qwen later, OpenAI-compatible). Streaming reply.
-  Channel-agnostic (voice reuses it). Clear error + retry without losing the typed text.
-  *Needs a Gemini API key — https://aistudio.google.com → Get API key (free).*
-- **TEXT-3** — persist user + assistant messages to `messages`, reload history in order,
-  scope every query by `shop_id`, feed recent turns as context to the LLM.
-  *Needs Sheheryar's real `db.py` (Supabase client) + tables.*
-- **TEXT-4** — system persona ("polite, concise AI shop employee"), Urdu / Roman-Urdu /
-  English code-switching, reply in the user's register, ask a short clarifying question
-  when input is ambiguous.
-- **VOICE-1** — push-to-talk mic capture (hold to record, release to send), mic-permission
-  handling, ignore empty/near-empty clips.
-- **VOICE-2** — captured audio → STT (ElevenLabs Scribe / Whisper) → transcript → the
-  **same** `/messages` endpoint tagged `channel=voice`; set `transcription_confidence`;
-  prompt retry on empty / low-confidence.
-- **VOICE-3** — assistant reply text → TTS **behind an adapter interface**
-  (`app/services/voice.py`), so the provider can be swapped without touching capture or
-  STT. Always show the reply as text too; degrade gracefully if TTS fails.
-- **VOICE-4** — full speak→hear loop; voice + text share one conversation thread;
-  a mis-transcription can be fixed by typing without restarting.
+Stateless streaming endpoint (no DB yet — frontend sends recent turns in the body).
+
+**Files:**
+```
+backend/app/services/llm.py           stream_reply() — openai.AsyncOpenAI vs any
+                                      OpenAI-compatible endpoint; provider swap
+                                      = config only. (TEXT-4 prepends SYSTEM_PROMPT here.)
+backend/app/routers/conversations.py  POST /conversations/{id}/messages — SSE
+                                      (named events: delta / done / error)
+backend/app/main.py                   mounts the conversations router
+frontend/src/lib/chatApi.ts           real fetch + SSE parser (buffered), 30s timeout,
+                                      onDelta/onComplete callbacks
+frontend/src/lib/types.ts             MessageStatus += "streaming"
+frontend/src/components/chat/ChatScreen.tsx   streams reply, per-tab conversationId,
+                                      id-based retry (no dup user bubble)
+frontend/src/components/chat/ChatThread.tsx   retry button on assistant error bubble
+```
+
+Tested: streaming, Roman-Urdu, multi-turn context, Urdu RTL, error + retry.
+`next build` + backend import clean.
+
+---
+
+## DONE: TEXT-4 — Language handling & assistant persona
+
+System prompt in `backend/app/prompts.py` (`SYSTEM_PROMPT`), prepended in
+`llm.py`. Covers: polite "dukaan ka AI assistant" persona (aap, concise, no
+markdown), reply in the shopkeeper's language/register (Roman-Urdu / Urdu
+script / English / code-switched), ask ONE clarifying question on vague input
+instead of guessing, and — critical for Phase 1 — never fake a save/record
+(no tools yet; only explicit "record kar do" gets a "feature coming soon" line).
+`reasoning_effort` is now config-driven (`LLM_REASONING_EFFORT`, provider-specific).
+
+Tested 8-turn conversation: persona, language switching, no-fake-save, and
+arithmetic all pass. Urdu *script* quality is model-limited (see LLM note below).
+
+---
+
+## DONE: VOICE-1 — Push-to-talk capture
+
+Frontend-only. Hold the mic to record, release to send. No new npm deps, no
+backend changes, the audio blob never leaves the browser.
+
+**Files created:**
+```
+frontend/src/lib/voice/usePushToTalk.ts   Capture state machine — getUserMedia +
+                                          MediaRecorder. Statuses idle/requesting/
+                                          recording/denied/error. Guards:
+                                          MIN_RECORD_MS=450, MIN_BLOB_BYTES=2048,
+                                          MAX_RECORD_MS=60000 (safety auto-stop).
+                                          Discards a clip if released while the
+                                          permission prompt is still open; always
+                                          stops mic tracks; unmount cleanup.
+frontend/src/lib/voice/stt.ts              transcribeAudio(clip) STUB — 600ms delay,
+                                          returns a random fixed Urdu sentence.
+                                          VOICE-2 swap point (Speechmatics).
+frontend/src/components/voice/
+  PushToTalkButton.tsx                     Big emerald mic (mockup SVG). Pointer
+                                          events + setPointerCapture (release off
+                                          the button still sends). animate-ping
+                                          ring while recording; long-press menu /
+                                          text selection suppressed; spinner on
+                                          "requesting"; muted-mic on "denied".
+  RecordingIndicator.tsx                   Pulsing dot + "Sun raha hoon…" + m:ss
+                                          timer, aria-live. Shown for the whole
+                                          capture.
+  VoiceBar.tsx                             Release flow: stop() -> guard -> stub
+                                          transcript -> onSend (same path typed
+                                          messages take). Re-checks disabled at
+                                          release; transient "bohat mukhtasar"
+                                          hint on a too-short tap; denied/error
+                                          notice pointing to browser mic settings.
+```
+
+**Shared-file edit (only one):** `frontend/src/components/chat/ChatScreen.tsx` —
+renders `<VoiceBar onSend={handleSend} disabled={isPending} />` between
+`<ChatThread>` and `<ChatInput>`. Nothing else touched.
+
+`next build` + `next lint` pass clean (0 errors).
+
+**Decisions:** dedicated voice bar above the input (not a small mic in the input
+row) to keep the mic big and voice-first; `channel:"voice"` tagging deferred to
+VOICE-2 (its AC; backend `MessageRequest.channel` already defaults to `"text"`).
+
+**Known / expected:** the transcript is a stub — it ignores your speech and
+returns a random canned sentence. Real STT is VOICE-2 and replaces ONLY the body
+of `transcribeAudio()` in `lib/voice/stt.ts`; capture and UI don't change.
+Secure-context only (mic is unavailable over plain HTTP — fine on localhost, the
+demo host must be HTTPS). Primary target Chrome; mime negotiation covers Safari.
+
+---
+
+## DONE: VOICE-2 — Speech-to-text (STT) integration
+
+Captured clip → backend proxy → Speechmatics → real transcript → the shared
+`/conversations` endpoint tagged `channel="voice"`. Transcript shows as the user
+bubble; low-confidence / empty → retry prompt, nothing sent.
+
+**Files created:**
+```
+backend/app/services/stt.py     transcribe(audio, content_type) -> Transcript{text,
+                                confidence}. Provider behind one interface, picked
+                                by STT_PROVIDER:
+                                - speechmatics (default): batch REST — create job
+                                  (multipart data_file + config JSON, language "ur",
+                                  operating_point "enhanced", additional_vocab from
+                                  STT_EXTRA_VOCAB) → poll GET /jobs/{id} (~1s, ~25s
+                                  cap) → GET transcript?format=json-v2 → join words,
+                                  mean word confidence.
+                                - groq: whisper-large-v3 on the LLM key; confidence
+                                  approximated from segment avg_logprob.
+backend/app/routers/voice.py    POST /voice/transcribe (multipart file) -> {transcript,
+                                confidence}. 10MB cap, 502 if unconfigured, 422 empty.
+```
+
+**Files edited:**
+```
+backend/app/config.py           + stt_provider, stt_language, stt_extra_vocab,
+                                speechmatics_* , groq_stt_* ; helpers
+                                stt_extra_vocab_list, effective_groq_stt_key
+backend/app/main.py             mounts voice.router at /voice
+backend/app/prompts.py          + VOICE_LANGUAGE_HINT — voice turns reply in
+                                Roman-Urdu (STT gives Urdu script → gpt-oss-120b
+                                hallucinates script; Roman-Urdu is its strong register)
+backend/app/services/llm.py     stream_reply(turns, channel="text") — appends
+                                VOICE_LANGUAGE_HINT as a 2nd system msg when voice
+backend/app/routers/conversations.py  passes body.channel into stream_reply
+backend/.env.example            + STT_PROVIDER / SPEECHMATICS_API_KEY / STT_EXTRA_VOCAB / ...
+backend/pyproject.toml          pins httpx (was transitive via fastapi[standard])
+frontend/src/lib/voice/stt.ts   real transcribeAudio() — uploads blob to
+                                /voice/transcribe, 40s timeout, returns
+                                {transcript, confidence}. exports STT_MIN_CONFIDENCE=0.5
+frontend/src/lib/chatApi.ts     sendMessage(..., channel: "text"|"voice" = "text")
+                                — added to request body
+frontend/src/lib/types.ts       + Channel type, optional Message.channel
+frontend/src/components/chat/ChatScreen.tsx   handleSend(text, channel); user bubble
+                                tagged; retry keeps the original channel
+frontend/src/components/voice/VoiceBar.tsx     confidence/empty gate → "Awaaz saaf
+                                samajh nahi aayi" retry prompt; else onSend(t, "voice");
+                                error toast; "Likh raha hoon…" while transcribing
+```
+
+**Config to run:** `backend/.env` needs `STT_PROVIDER=speechmatics` +
+`SPEECHMATICS_API_KEY=...` (+ optional `STT_EXTRA_VOCAB`). A-B test Whisper with
+`STT_PROVIDER=groq` (reuses `LLM_API_KEY`).
+
+**Tested:** real Urdu / code-switched speech → transcript (Urdu script) → Roman-Urdu
+reply; silence → retry prompt, no `/conversations` call; `channel:"voice"` in the
+payload. `next build` + `next lint` + backend import all clean.
+
+**Known / expected:** transcript is Urdu script (no Roman-Urdu STT mode exists);
+`additional_vocab` biases but doesn't guarantee accented English words ("chips"
+still misheard sometimes). `transcription_confidence` is computed and gated
+client-side. **Now persisted** — TEXT-3 stores it on voice messages; send it as
+`transcription_confidence` alongside `channel="voice"`.
+
+---
+
+## DONE: VOICE-3 — Text-to-speech reply playback
+
+Voice-turn reply text → backend TTS adapter → MP3 → played aloud. Reply is always
+shown as text; audio degrades gracefully (failure / autoplay-block → tap-to-play).
+
+**Files created:**
+```
+backend/app/services/voice.py   synthesize(text, voice=None) -> mp3 bytes. Provider
+                                behind one interface, picked by TTS_PROVIDER:
+                                - edge (default): edge-tts, no key, ur-PK neural
+                                  voices via Edge's (unofficial) endpoint.
+                                - azure: same ur-PK voices via Azure Speech REST +
+                                  SSML (needs AZURE_SPEECH_KEY/REGION). SSML MUST
+                                  carry xmlns=".../synthesis" or Azure ignores
+                                  <voice> and uses the region default (Hindi in
+                                  centralindia).
+                                Optional TTS_TRANSLITERATE: a Groq call rewrites the
+                                Roman-Urdu reply to Urdu script before synthesis
+                                (ur-PK voices read Latin text poorly / truncate);
+                                best-effort, falls back to the original on error.
+                                TTSError on failure.
+frontend/src/lib/voice/tts.ts   synthesizeSpeech(text) -> audio Blob, 20s timeout.
+frontend/src/lib/voice/useReplySpeech.ts   one <audio>; speak(id,text)/stop();
+                                status idle|loading|playing|blocked|error; autoplay
+                                reject = "blocked" not error; supersede guard.
+frontend/src/components/voice/ReplaySpeechButton.tsx   🔊 Suniye / ⏹ Rokiye control.
+```
+
+**Files edited:**
+```
+backend/app/routers/voice.py    + POST /voice/speak {text} -> audio/mpeg (502 if
+                                unconfigured, 422 empty, 8k-char cap)
+backend/app/config.py           + tts_provider, tts_voice, tts_rate, tts_transliterate,
+                                azure_speech_key, azure_speech_region
+backend/.env.example            + TTS_PROVIDER / TTS_VOICE / TTS_RATE / TTS_TRANSLITERATE
+                                / AZURE_SPEECH_KEY / AZURE_SPEECH_REGION
+backend/pyproject.toml          + edge-tts
+frontend/src/lib/types.ts       + Message.spoken?: boolean
+frontend/src/components/chat/ChatScreen.tsx   accumulates reply text; on a voice-turn
+                                reply completing → marks spoken + speech.speak(...)
+frontend/src/components/chat/ChatThread.tsx + ChatBubble.tsx   render the replay
+                                button for spoken, complete assistant messages
+```
+
+**Config to run:** nothing required — `TTS_PROVIDER=edge` (default) needs no key,
+just internet. For Azure: `TTS_PROVIDER=azure` + `AZURE_SPEECH_KEY` +
+`AZURE_SPEECH_REGION` (short name, e.g. `centralindia`). `TTS_VOICE` picks the
+voice for either provider: `ur-PK-AsadNeural` (M) / `ur-PK-UzmaNeural` (F).
+
+**Tested:** voice message → reply spoken aloud; replay button works; broken
+provider → text only, no hang; `TTS_TRANSLITERATE=true` improves ur-PK
+pronunciation and fixes edge-tts mid-sentence truncation. `next build` +
+`next lint` + backend import clean.
+
+**Known / expected:** edge-tts is an unofficial MS endpoint — fine for dev, can
+rate-limit / break / truncate; switch to Azure for the demo (0.5M chars/mo free).
+Roman-Urdu on ur-PK voices is rough without `TTS_TRANSLITERATE`. Azure vs edge
+quality difference is modest once transliteration is on. No audio caching/storage.
+
+---
+
+## DONE: VOICE-4 — End-to-end loop & multimodal parity
+
+Frontend-only. Because voice already rides the same `handleSend` path as typed
+text, 3 of the 4 ACs were satisfied by the architecture — this adds the polish.
+
+**AC status:**
+- Full voice round-trip, no manual steps → already worked (VOICE-1→2→3 chain).
+- Voice + text in one thread, in order → already worked; voice turns now show a 🎤 tag.
+- Typed follow-up uses the prior voice turn as context → already worked (`toTurns`
+  is channel-agnostic; backend prepends all prior turns).
+- Mis-transcription recovery → **reinterpreted: re-speak, not re-type.** Shopkeepers
+  don't type Urdu and voice is the primary input, so a "correct by typing"
+  affordance is the wrong tool. Instead: a "↺ Ghalat? Phir bolein" button on the
+  most recent voice turn discards it + everything after and invites a fresh
+  recording.
+
+**Files edited:**
+```
+frontend/src/components/chat/ChatBubble.tsx    🎤 tag on voice user bubbles;
+                                "↺ Ghalat? Phir bolein" button
+frontend/src/components/chat/ChatThread.tsx    finds the most recent voice user
+                                turn (even behind later text turns); shows the
+                                redo button there when not mid-reply
+frontend/src/components/chat/ChatScreen.tsx    handleRedoVoice() — stop audio,
+                                slice the thread to before that turn, flash a
+                                "Phir boliye" prompt; speech.stop() at the start
+                                of every send; 🔊/🔇 header toggle (speakReplies,
+                                default ON) — now EVERY reply is spoken (voice or
+                                text), not just voice turns
+frontend/src/components/voice/VoiceBar.tsx     onCaptureStart (stops a playing
+                                reply when a new recording begins); `notice` prop
+                                for the "Phir boliye" prompt
+```
+
+**Tested:** full voice loop with no clicks between stages; voice+text interleaved
+in order with 🎤 tags; typed follow-up carries voice context; ↺ redo discards the
+turn + trailing turns and re-records cleanly; 🔊 toggle mutes/unmutes all replies
+and stops in-flight playback. `next build` + `next lint` clean. No backend change.
+
+**Known / expected:** redo trims the thread from the chosen turn onward (its reply
+and any later turns, including typed ones) — intentional, a bad base turn usually
+makes the rest of the exchange wrong too. `speakReplies` state is per-tab, not
+persisted.
+
+---
+
+## LLM provider — current state (2026-09-01)
+
+Google locked new API keys to `gemini-3.6-flash` only (20 requests/day free) —
+**Gemini free tier is unusable** for this. Now on **Groq free tier**:
+```
+LLM_BASE_URL=https://api.groq.com/openai/v1
+LLM_API_KEY=gsk_...            # console.groq.com — free
+LLM_MODEL=openai/gpt-oss-120b  # best free option for Roman-Urdu; qwen3.x-27b was weaker
+LLM_REASONING_EFFORT=low       # Groq now REJECTS "none" for gpt-oss-120b — must be low/medium/high
+```
+Roman-Urdu is coherent; Urdu script still hallucinates on gpt-oss-120b. **Before the
+demo**, switch to Alibaba Model Studio Qwen (`qwen-plus`/`qwen-max`, free tier ~1M
+tokens) — better Urdu + aligns with the hackathon. Swap = 3 `.env` lines, no code.
+Groq also has `whisper-large-v3` (STT) on the same key — useful for VOICE-2.
+
+---
+
+## DONE (backend): TEXT-3 — Conversation persistence & history
+
+Branch `feat/text3-persistence`. User + assistant messages persist to `messages`,
+history reloads in order, every query is scoped by `shop_id`, and recent turns feed
+the LLM. 51 new tests, full suite green (88).
+
+**Design:** one `conversations` row per shop — lazily created, never closed, no
+thread/session concept. Storage is unbounded (INSERT only); the *context window* is
+capped at `LLM_MAX_CONTEXT_TURNS` (default 8) and applied at read time, so tokens
+and latency stay flat as the thread grows. Voice collapses to a transcript; audio is
+never stored. Full rationale in `docs/text-model/TEXT-3.md`.
+
+**Endpoints** (both need `Authorization: Bearer <supabase access token>`):
+`POST /conversations/{conversation_id}/messages` (path id ignored — the shop's thread
+is resolved server-side; SSE `meta` → `delta`… → `done`|`error`) and
+`GET /conversations/history?limit=30`.
+
+### Two things the rest of the team needs to know
+
+**1. `backend/app/auth.py` is no longer a stub — please review.**
+It was dead code (imported by nothing) and its own docstring invited swapping the
+body while keeping the `CurrentUser` shape, which is exactly what happened. It now
+verifies the Supabase access token and reads `shop_id` / `role_name` from
+`public.profiles`. This is **provisional**: the AUTH epic owns the final version, and
+AUTH-1/AUTH-3 will land on top of it. It deliberately does **not** depend on
+`public.current_shop_id()` / `app_metadata.shop_id` — the backend uses the
+service_role key and scopes every query itself — so it is unaffected by the fact
+that nothing currently populates that claim.
+
+**2. `supabase/migrations/20260902190000_text3_conversation_shop_unique.sql` is
+written but NOT applied — it needs the migrations owner's ack.**
+It adds `UNIQUE(conversations.shop_id)` to enforce one-thread-per-shop at the schema
+level. Two consequences to weigh first: it makes that product decision permanent,
+and because `conversations.user_id` is `NOT NULL ... ON DELETE CASCADE`, deleting the
+auth user who happened to send the first message would cascade away the shop's
+**entire** chat history for every user in that shop. Consider switching that FK to
+`ON DELETE SET NULL` before applying. Until it is applied, `get_or_create_conversation`
+uses a deterministic `order by created_at limit 1`, which is correct but not
+race-proof against two simultaneous first-messages.
+
+## NEXT: TEXT-5 — Chat UI integration & history rendering
+
+TEXT-3's AC "history reloads on return" is a UI scenario and is **not** met yet: the
+chat UI has never rendered. `feat/auth` created a root `frontend/app/` tree while the
+chat UI lives under `frontend/src/app/`; Next.js serves only the root one, so
+`ChatScreen` is dead code. Reconciling the trees (including Tailwind v3 → v4 in
+`globals.css`) touches auth-owned files, hence a separate ticket:
+`docs/text-model/TEXT-5.md`.
+
+## The VOICE epic — DONE (all 4)
+
+All reuse TEXT-2's stateless `POST /conversations/{id}/messages`. Details in the
+"DONE: VOICE-1/2/3/4" sections above.
+
+- **VOICE-1** — push-to-talk capture.
+- **VOICE-2** — Speechmatics STT (Groq whisper A-B fallback); `channel=voice`
+  threaded through to a Roman-Urdu reply nudge.
+- **VOICE-3** — TTS adapter in `backend/app/services/voice.py`; edge-tts (default)
+  + Azure REST, `ur-PK` voices, optional Groq transliteration to Urdu script.
+- **VOICE-4** — full loop + multimodal parity; 🎤 tags, "↺ Ghalat? Phir bolein"
+  re-speak recovery, 🔊/🔇 speak-all-replies toggle.
+
+## Blocked until Sheheryar's DB lands
+
+- **TEXT-3** — persistence (see above). Not blocking anything else — do it whenever the
+  `conversations` / `messages` tables + `backend/app/db.py` (real Supabase client) exist.
 
 ---
 

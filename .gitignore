@@ -6,3 +6,11 @@ Thumbs.db
 
 # Scratch
 _*.pdf
+
+# Qoder IDE
+.qoder/
+
+# supabase mcp server
+.mcp.json
+
+.env.local
