@@ -8,6 +8,11 @@ so the Urdu voice source can be swapped without touching capture (VOICE-1) or ST
   Edge's online endpoint (unofficial — the adapter is why we can swap out).
 - **azure** — the same `ur-PK` voices via Azure Speech's REST endpoint (needs a
   key). Fallback when edge-tts quality / reliability is not enough.
+- **elevenlabs** — ElevenLabs REST endpoint (needs a key + voice ID). Uses
+  `ELEVENLABS_VOICE_ID`, not `TTS_VOICE`.
+- **upliftai** — UpliftAI Orator voices, Urdu-first (needs a key). Uses
+  `UPLIFTAI_VOICE_ID`. Expects Urdu-script input, so pair with
+  `TTS_TRANSLITERATE=true` for Roman-Urdu replies.
 
 Voice-turn replies are Roman-Urdu (VOICE-2). If `TTS_TRANSLITERATE` is on, a Groq
 call converts them to Urdu script first for cleaner pronunciation; that step is
@@ -47,6 +52,10 @@ async def synthesize(text: str, *, voice: str | None = None) -> bytes:
         return await _synthesize_edge(clean, voice)
     if provider == "azure":
         return await _synthesize_azure(clean, voice)
+    if provider == "elevenlabs":
+        return await _synthesize_elevenlabs(clean)
+    if provider == "upliftai":
+        return await _synthesize_upliftai(clean)
     raise TTSError(f"Unknown TTS provider: {provider}")
 
 
@@ -146,4 +155,65 @@ async def _synthesize_azure(text: str, voice: str) -> bytes:
         raise TTSError(f"Azure TTS failed: {resp.status_code} {resp.text[:200]}")
     if not resp.content:
         raise TTSError("Azure TTS returned no audio")
+    return resp.content
+
+
+# ── ElevenLabs REST ───────────────────────────────────────────────────────────────
+
+async def _synthesize_elevenlabs(text: str) -> bytes:
+    if not settings.elevenlabs_api_key or not settings.elevenlabs_voice_id:
+        raise TTSError("ELEVENLABS_API_KEY / ELEVENLABS_VOICE_ID not set")
+
+    url = (
+        "https://api.elevenlabs.io/v1/text-to-speech/"
+        f"{settings.elevenlabs_voice_id}?output_format=mp3_44100_128"
+    )
+    headers = {
+        "xi-api-key": settings.elevenlabs_api_key,
+        "Content-Type": "application/json",
+    }
+    payload = {"text": text, "model_id": settings.elevenlabs_model_id}
+    logger.info(
+        "ElevenLabs TTS: voice=%s model=%s chars=%d",
+        settings.elevenlabs_voice_id, settings.elevenlabs_model_id, len(text),
+    )
+    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_S) as client:
+        resp = await client.post(url, headers=headers, json=payload)
+    if resp.status_code >= 400:
+        raise TTSError(
+            f"ElevenLabs TTS failed: {resp.status_code} {resp.text[:200]}"
+        )
+    if not resp.content:
+        raise TTSError("ElevenLabs TTS returned no audio")
+    return resp.content
+
+
+# ── UpliftAI REST ─────────────────────────────────────────────────────────────────
+
+async def _synthesize_upliftai(text: str) -> bytes:
+    if not settings.upliftai_api_key:
+        raise TTSError("UPLIFTAI_API_KEY not set")
+
+    url = "https://api.upliftai.org/v1/synthesis/text-to-speech"
+    headers = {
+        "Authorization": f"Bearer {settings.upliftai_api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "voiceId": settings.upliftai_voice_id,
+        "text": text,
+        "outputFormat": settings.upliftai_output_format,
+    }
+    logger.info(
+        "UpliftAI TTS: voice=%s format=%s chars=%d",
+        settings.upliftai_voice_id, settings.upliftai_output_format, len(text),
+    )
+    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_S) as client:
+        resp = await client.post(url, headers=headers, json=payload)
+    if resp.status_code >= 400:
+        raise TTSError(
+            f"UpliftAI TTS failed: {resp.status_code} {resp.text[:200]}"
+        )
+    if not resp.content:
+        raise TTSError("UpliftAI TTS returned no audio")
     return resp.content
