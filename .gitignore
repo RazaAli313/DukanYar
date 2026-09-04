@@ -9,3 +9,8 @@ _*.pdf
 
 # Qoder IDE
 .qoder/
+
+# supabase mcp server
+.mcp.json
+
+.env.local

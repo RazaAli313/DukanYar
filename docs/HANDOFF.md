@@ -2,7 +2,7 @@
 
 **Owner:** Usman (Muhammad Usman Tariq)
 **Branch:** `feat/text-voice-module` → PR against `develop` (Raza reviews & merges)
-**Last updated:** 2026-09-01 (TEXT-1, TEXT-2, TEXT-4 and the whole VOICE epic done; TEXT-3 blocked on DB)
+**Last updated:** 2026-09-02 (TEXT-3 backend done — persistence, auth dependency, history endpoint; UI integration split out as TEXT-5)
 **Module scope:** the TEXT pillar (TEXT-1..4) and the VOICE pillar (VOICE-1..4).
 Tickets: `docs/text-model/`, `docs/voice/`. Read each ticket's `.md` +
 `user-stories.md` + `index.md` before starting it.
@@ -263,7 +263,8 @@ payload. `next build` + `next lint` + backend import all clean.
 **Known / expected:** transcript is Urdu script (no Roman-Urdu STT mode exists);
 `additional_vocab` biases but doesn't guarantee accented English words ("chips"
 still misheard sometimes). `transcription_confidence` is computed and gated
-client-side but NOT persisted (no DB yet — TEXT-3).
+client-side. **Now persisted** — TEXT-3 stores it on voice messages; send it as
+`transcription_confidence` alongside `channel="voice"`.
 
 ---
 
@@ -391,12 +392,54 @@ Groq also has `whisper-large-v3` (STT) on the same key — useful for VOICE-2.
 
 ---
 
-## NEXT: TEXT-3 — Conversation persistence & history
+## DONE (backend): TEXT-3 — Conversation persistence & history
 
-Persist user + assistant messages to the `messages` table, reload history in order,
-scope every query by `shop_id`, feed recent turns as context to the LLM.
-**Needs Sheheryar's real `db.py` (Supabase client) + the `conversations` / `messages`
-tables.** Until those land, TEXT-3 is blocked — do TEXT-4 first if so.
+Branch `feat/text3-persistence`. User + assistant messages persist to `messages`,
+history reloads in order, every query is scoped by `shop_id`, and recent turns feed
+the LLM. 51 new tests, full suite green (88).
+
+**Design:** one `conversations` row per shop — lazily created, never closed, no
+thread/session concept. Storage is unbounded (INSERT only); the *context window* is
+capped at `LLM_MAX_CONTEXT_TURNS` (default 8) and applied at read time, so tokens
+and latency stay flat as the thread grows. Voice collapses to a transcript; audio is
+never stored. Full rationale in `docs/text-model/TEXT-3.md`.
+
+**Endpoints** (both need `Authorization: Bearer <supabase access token>`):
+`POST /conversations/{conversation_id}/messages` (path id ignored — the shop's thread
+is resolved server-side; SSE `meta` → `delta`… → `done`|`error`) and
+`GET /conversations/history?limit=30`.
+
+### Two things the rest of the team needs to know
+
+**1. `backend/app/auth.py` is no longer a stub — please review.**
+It was dead code (imported by nothing) and its own docstring invited swapping the
+body while keeping the `CurrentUser` shape, which is exactly what happened. It now
+verifies the Supabase access token and reads `shop_id` / `role_name` from
+`public.profiles`. This is **provisional**: the AUTH epic owns the final version, and
+AUTH-1/AUTH-3 will land on top of it. It deliberately does **not** depend on
+`public.current_shop_id()` / `app_metadata.shop_id` — the backend uses the
+service_role key and scopes every query itself — so it is unaffected by the fact
+that nothing currently populates that claim.
+
+**2. `supabase/migrations/20260902190000_text3_conversation_shop_unique.sql` is
+written but NOT applied — it needs the migrations owner's ack.**
+It adds `UNIQUE(conversations.shop_id)` to enforce one-thread-per-shop at the schema
+level. Two consequences to weigh first: it makes that product decision permanent,
+and because `conversations.user_id` is `NOT NULL ... ON DELETE CASCADE`, deleting the
+auth user who happened to send the first message would cascade away the shop's
+**entire** chat history for every user in that shop. Consider switching that FK to
+`ON DELETE SET NULL` before applying. Until it is applied, `get_or_create_conversation`
+uses a deterministic `order by created_at limit 1`, which is correct but not
+race-proof against two simultaneous first-messages.
+
+## NEXT: TEXT-5 — Chat UI integration & history rendering
+
+TEXT-3's AC "history reloads on return" is a UI scenario and is **not** met yet: the
+chat UI has never rendered. `feat/auth` created a root `frontend/app/` tree while the
+chat UI lives under `frontend/src/app/`; Next.js serves only the root one, so
+`ChatScreen` is dead code. Reconciling the trees (including Tailwind v3 → v4 in
+`globals.css`) touches auth-owned files, hence a separate ticket:
+`docs/text-model/TEXT-5.md`.
 
 ## The VOICE epic — DONE (all 4)
 

@@ -86,3 +86,28 @@ This message came from voice (speech-to-text). Regardless of the script of the
 transcript, reply in Roman-Urdu (Latin letters) — never Urdu/Arabic script.
 Keep English product words (coke, chips, etc.) as they are.
 """
+
+
+# ── Mode-scoped prompts (TEXT-5) ────────────────────────────────────────────
+# The shopkeeper picks the mode on the dashboard, so the assistant never
+# classifies intent. Each mode narrows what the assistant is here to do.
+
+MODE_HINTS = {
+    "sale": (
+        "The shopkeeper is on the SALE screen. They are recording a sale. Help "
+        "them state items, quantities and the total, then confirm."
+    ),
+    "udhaar": (
+        "The shopkeeper is on the UDHAAR (credit ledger) screen. They are "
+        "recording credit given to a customer, or a repayment. Ask for the "
+        "khata number / customer and the amount."
+    ),
+    "kharcha": (
+        "The shopkeeper is on the KHARCHA (expense) screen. They are recording "
+        "money the shop spent. Ask for what it was and how much."
+    ),
+    "ask": (
+        "The shopkeeper is on the POOCHO screen — free questions about their "
+        "shop and general help. Answer naturally and briefly."
+    ),
+}
