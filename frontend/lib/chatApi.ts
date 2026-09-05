@@ -7,7 +7,7 @@
  * never sent by the client.
  */
 
-import { createClient } from "../../utils/supabase/client";
+import { createClient } from "@/utils/supabase/client";
 import type { Channel, Message, Sender } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
