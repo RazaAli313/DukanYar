@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import type { Channel, Message } from "@/lib/types";
-import { sendMessage, MAX_RECENT_TURNS } from "@/lib/chatApi";
+import { sendMessage } from "@/lib/chatApi";
 import { useReplySpeech } from "@/lib/voice/useReplySpeech";
 import { ChatThread } from "./ChatThread";
 import { ChatInput } from "./ChatInput";
@@ -10,17 +10,6 @@ import { VoiceBar } from "@/components/voice/VoiceBar";
 
 function generateId(): string {
   return crypto.randomUUID();
-}
-
-/** Map frontend Message to the Turn shape expected by the backend. */
-function toTurns(messages: Message[]): { role: "user" | "assistant"; content: string }[] {
-  return messages
-    .filter((m) => m.status === "complete" || m.status === "streaming")
-    .slice(-MAX_RECENT_TURNS)
-    .map((m) => ({
-      role: m.sender === "user" ? ("user" as const) : ("assistant" as const),
-      content: m.text,
-    }));
 }
 
 export interface ChatScreenProps {
@@ -55,9 +44,6 @@ export function ChatScreen({ shopName, userEmail, onSignOut }: ChatScreenProps =
       let replyText = "";
       speech.stop(); // a new message supersedes any playing reply
       setVoiceNotice(null);
-      // ── FIX B: build recent_turns BEFORE appending the new user message,
-      // so the current message is not sent twice (once in recent_turns, once as text).
-      const recentTurns = toTurns(messages);
 
       const userMsg: Message = {
         id: generateId(),
@@ -80,11 +66,10 @@ export function ChatScreen({ shopName, userEmail, onSignOut }: ChatScreenProps =
 
       try {
         await sendMessage(
-          conversationId,
+          "ask",
           text,
-          recentTurns,
           {
-            onDelta: (delta) => {
+            onDelta: (delta: string) => {
               replyText += delta;
               setMessages((prev) =>
                 prev.map((m) =>
@@ -158,10 +143,6 @@ export function ChatScreen({ shopName, userEmail, onSignOut }: ChatScreenProps =
         prev.filter((m) => m.id !== failedAssistantId),
       );
 
-      // Build recent_turns from messages BEFORE this user message (exclusive).
-      const contextMessages = messages.slice(0, userIdx);
-      const recentTurns = toTurns(contextMessages);
-
       const pendingMsg: Message = {
         id: generateId(),
         sender: "assistant",
@@ -175,11 +156,10 @@ export function ChatScreen({ shopName, userEmail, onSignOut }: ChatScreenProps =
 
       try {
         await sendMessage(
-          conversationId,
+          "ask",
           userMessage.text,
-          recentTurns,
           {
-            onDelta: (delta) => {
+            onDelta: (delta: string) => {
               replyText += delta;
               setMessages((prev) =>
                 prev.map((m) =>

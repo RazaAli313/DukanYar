@@ -1,8 +1,8 @@
 'use server'
 
-import { createClient } from '../../utils/supabase/server';
-import { resolveProduct, ResolveResult } from '../../src/lib/sales/catalogService';
-import { recordSale, RecordSaleParams, StockAlert } from '../../src/lib/sales/salesService';
+import { createClient } from '@/utils/supabase/server';
+import { resolveProduct, ResolveResult } from '@/lib/sales/catalogService';
+import { recordSale, RecordSaleParams, StockAlert } from '@/lib/sales/salesService';
 
 /**
  * Server Action: Resolve product by name or alias (SALE-2).
@@ -61,7 +61,7 @@ export async function processSaleAction(params: Omit<RecordSaleParams, 'shop_id'
     let warningMessage: string | undefined;
     if (result.stock_alerts && result.stock_alerts.length > 0) {
       const itemsStr = result.stock_alerts
-        .map((a) => `${a.product_name} (${a.new_stock})`)
+        .map((a: StockAlert) => `${a.product_name} (${a.new_stock})`)
         .join(', ');
       warningMessage = `Sale recorded, but inventory went negative for: ${itemsStr}`;
     }
