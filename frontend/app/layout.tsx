@@ -25,6 +25,12 @@ export const metadata: Metadata = {
   title: "DukanYar — aap dukan sambhalein, hisaab hum",
   description:
     "Aap bolen, DukanYar sunta hai aur khata rakh deta hai. Voice-first hisaab-kitaab for kiryana shopkeepers.",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "DukanYar",
+  },
 };
 
 export const viewport: Viewport = {

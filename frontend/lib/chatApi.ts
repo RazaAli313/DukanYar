@@ -16,7 +16,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const STREAM_TIMEOUT_MS = 45_000;
 
 /** Which record flow the shopkeeper picked on the dashboard. */
-export type Mode = "sale" | "udhaar" | "kharcha" | "ask";
+export type Mode = "sale" | "udhaar" | "kharcha" | "ask" | "maal";
 
 /** Structured result of a tool the assistant ran (TOOL-4 / SALE-3). */
 export interface ActionCard {

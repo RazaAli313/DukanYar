@@ -7,7 +7,45 @@ on:
     branches: ["**"]
 
 jobs:
-  build:
+  # ── Backend (FastAPI / Python) ────────────────────────────────────────────
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Lint (ruff)
+        run: uv run ruff check . || true   # non-blocking until lint gates are tuned
+
+      - name: Type-check (pyright)
+        run: uv run pyright || true        # non-blocking until strict mode stabilises
+
+      - name: Import check (startup smoke test)
+        run: uv run python -c "from app.main import app; print('Backend import OK')"
+        env:
+          SUPABASE_URL: "https://placeholder.supabase.co"
+          SUPABASE_KEY: "placeholder"
+          LLM_BASE_URL: "https://placeholder.openai.com/v1"
+          LLM_API_KEY: "placeholder"
+          LLM_MODEL: "placeholder"
+
+  # ── Frontend (Next.js) ────────────────────────────────────────────────────
+  frontend:
     runs-on: ubuntu-latest
     defaults:
       run:

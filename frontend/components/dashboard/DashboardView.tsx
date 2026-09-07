@@ -7,6 +7,7 @@ import {
   Users,
   ReceiptText,
   Sparkles,
+  Package,
   TriangleAlert,
   ArrowRight,
 } from "lucide-react";
@@ -20,6 +21,7 @@ const actions = [
   { href: "/record/udhaar", label: "Udhaar", sub: "Udhaar entry karein", icon: Users },
   { href: "/record/kharcha", label: "Kharcha", sub: "Dukaan ka kharcha", icon: ReceiptText },
   { href: "/record/ask", label: "Poocho", sub: "Kisi bhi sawal ka jawab", icon: Sparkles },
+  { href: "/record/maal", label: "Maal", sub: "Stock update karein", icon: Package },
 ];
 
 function greeting() {
@@ -75,10 +77,17 @@ export function DashboardView({ shopName }: { shopName: string }) {
             <Skeleton className="mt-2 h-10 w-40" />
           )}
         </div>
-        <div className="grid grid-cols-3 divide-x divide-border border-t border-border text-center">
+        <div className="grid grid-cols-2 divide-x divide-border border-t border-border text-center">
           <Stat label="Total Sale" value={data && pkr(data.totals.sale)} />
           <Stat label="Udhaar diya" value={data && pkr(data.totals.udhaar_today)} />
+        </div>
+        <div className="grid grid-cols-2 divide-x divide-border border-t border-border text-center">
           <Stat label="Kul Kharcha" value={data && pkr(data.totals.kharcha)} />
+          <Stat
+            label="Baqaya Udhaar"
+            value={data && pkr(data.totals.outstanding_udhaar)}
+            highlight={data ? data.totals.outstanding_udhaar > 0 : false}
+          />
         </div>
       </Card>
 
@@ -177,12 +186,27 @@ export function DashboardView({ shopName }: { shopName: string }) {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string | null | undefined }) {
+function Stat({
+  label,
+  value,
+  highlight = false,
+}: {
+  label: string;
+  value: string | null | undefined;
+  highlight?: boolean;
+}) {
   return (
     <div className="px-2 py-3">
       <p className="text-xs text-muted-foreground">{label}</p>
-      {value ? (
-        <p className="amount mt-0.5 text-sm font-semibold">{value}</p>
+      {value !== null && value !== undefined ? (
+        <p
+          className={
+            "amount mt-0.5 text-sm font-semibold " +
+            (highlight ? "text-caution-foreground" : "")
+          }
+        >
+          {value}
+        </p>
       ) : (
         <Skeleton className="mx-auto mt-1 h-4 w-16" />
       )}

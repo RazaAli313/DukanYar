@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, TriangleAlert, Loader2 } from "lucide-react";
+import { Check, TriangleAlert, Loader2, Undo2 } from "lucide-react";
 import type { ActionCard } from "@/lib/chatApi";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,9 +10,19 @@ interface Props {
   busy?: boolean;
   onConfirm?: () => void;
   onCancel?: () => void;
+  /** Called after a successful undo — passes back the card so the caller can update state. */
+  onUndo?: () => void;
+  undoBusy?: boolean;
 }
 
-export function ConfirmationCard({ card, busy, onConfirm, onCancel }: Props) {
+export function ConfirmationCard({
+  card,
+  busy,
+  onConfirm,
+  onCancel,
+  onUndo,
+  undoBusy,
+}: Props) {
   const recorded = card.status === "recorded";
   const failed = card.status === "failed";
 
@@ -65,6 +75,7 @@ export function ConfirmationCard({ card, busy, onConfirm, onCancel }: Props) {
         </p>
       )}
 
+      {/* Proposed — confirm / cancel buttons */}
       {!recorded && !failed && (
         <div className="flex gap-2 border-t border-border p-3">
           <Button variant="outline" className="flex-1" onClick={onCancel} disabled={busy}>
@@ -72,6 +83,28 @@ export function ConfirmationCard({ card, busy, onConfirm, onCancel }: Props) {
           </Button>
           <Button className="flex-1" onClick={onConfirm} disabled={busy}>
             {busy ? <Loader2 className="size-4 animate-spin" /> : "Haan, save karein"}
+          </Button>
+        </div>
+      )}
+
+      {/* Recorded — undo button (TOOL-3) */}
+      {recorded && onUndo && (
+        <div className="flex border-t border-border p-3">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="flex-1 text-muted-foreground hover:text-destructive"
+            onClick={onUndo}
+            disabled={undoBusy}
+          >
+            {undoBusy ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <>
+                <Undo2 className="size-3.5 mr-1.5" />
+                Wapas karo (undo)
+              </>
+            )}
           </Button>
         </div>
       )}

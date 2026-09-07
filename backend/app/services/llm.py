@@ -64,6 +64,40 @@ async def stream_reply(
             yield delta.content
 
 
+async def tool_call_reply(
+    turns: list[dict],
+    tools: list[dict],
+    channel: str = "text",
+    mode: str | None = None,
+) -> dict:
+    """Non-streaming model call with tool schemas injected (TOOL-2).
+
+    Returns the raw ``message`` from the model's response so the orchestration
+    loop can inspect ``tool_calls`` and dispatch them, or fall back to the
+    ``content`` text if no tool was called.
+    """
+    messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    if mode and mode in MODE_HINTS:
+        messages.append({"role": "system", "content": MODE_HINTS[mode]})
+    if channel == "voice":
+        messages.append({"role": "system", "content": VOICE_LANGUAGE_HINT})
+    messages.extend(turns)
+
+    client = _get_client()
+    extra_kwargs: dict = {}
+    if settings.llm_reasoning_effort:
+        extra_kwargs["reasoning_effort"] = settings.llm_reasoning_effort
+
+    resp = await client.chat.completions.create(
+        model=settings.llm_model,
+        messages=messages,
+        tools=tools,
+        tool_choice="auto",
+        **extra_kwargs,
+    )
+    return resp.choices[0].message
+
+
 # ── structured extraction for mode-scoped record flows (TEXT-5) ──────────────
 
 import json as _json  # noqa: E402

@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { ShoppingCart, Users, ReceiptText, Sparkles } from "lucide-react";
+import { ShoppingCart, Users, ReceiptText, Sparkles, Package } from "lucide-react";
 import type { Mode } from "@/lib/chatApi";
 
 export type { Mode };
@@ -42,8 +42,15 @@ export const MODES: Record<Mode, ModeConfig> = {
     icon: Sparkles,
     confirms: false,
   },
+  maal: {
+    title: "Maal",
+    hint: "Stock update karein ya naya maal add karein.",
+    placeholder: "jaise: coke ka stock 50 karo",
+    icon: Package,
+    confirms: false,
+  },
 };
 
 export function isMode(v: string): v is Mode {
-  return v === "sale" || v === "udhaar" || v === "kharcha" || v === "ask";
+  return ["sale", "udhaar", "kharcha", "ask", "maal"].includes(v);
 }

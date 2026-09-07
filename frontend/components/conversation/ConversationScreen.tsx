@@ -10,6 +10,7 @@ import {
   type Mode,
 } from "@/lib/chatApi";
 import { api } from "@/lib/api";
+import { isRtl } from "@/lib/rtl";
 import { usePushToTalk } from "@/lib/voice/usePushToTalk";
 import { transcribeAudio, STT_MIN_CONFIDENCE } from "@/lib/voice/stt";
 import { useReplySpeech } from "@/lib/voice/useReplySpeech";
@@ -40,6 +41,14 @@ export function ConversationScreen({ mode }: { mode: Mode }) {
   const [locked, setLocked] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [undoBusy, setUndoBusy] = useState(false);
+
+  // Holds the IDs returned after a confirmed action so undo knows what to reverse.
+  const recordedRef = useRef<{
+    sale_id?: string;
+    expense_id?: string;
+    entry_id?: string;
+  } | null>(null);
 
   // The thread is one per shop and persists — reload it so a refresh doesn't
   // wipe the conversation.
@@ -194,6 +203,13 @@ export function ConversationScreen({ mode }: { mode: Mode }) {
           new_customer: (p._new as boolean) ?? false,
         });
       }
+      // Persist undo IDs for the undo button.
+      const resAny = res as unknown as Record<string, unknown>;
+      recordedRef.current = {
+        sale_id: resAny.sale_id as string | undefined,
+        expense_id: resAny.expense_id as string | undefined,
+        entry_id: resAny.entry_id as string | undefined,
+      };
       setCard(res.card as ActionCard);
       setLocked(true);
       const line = `${res.card.title} record ho gaya${
@@ -210,6 +226,33 @@ export function ConversationScreen({ mode }: { mode: Mode }) {
       setBusy(false);
     }
   }, [speech]);
+
+  // ── undo a recorded action (TOOL-3) ───────────────────────────────────────
+  const undoAction = useCallback(async () => {
+    const ids = recordedRef.current;
+    if (!ids) return;
+    setUndoBusy(true);
+    try {
+      if (ids.sale_id) {
+        await api.undoSale(ids.sale_id);
+      } else if (ids.expense_id) {
+        await api.deleteExpense(ids.expense_id);
+      } else if (ids.entry_id) {
+        await api.undoUdhaar(ids.entry_id);
+      }
+      recordedRef.current = null;
+      setCard(null);
+      setLocked(false);
+      setMessages((m) => [
+        ...m,
+        { id: uid(), role: "assistant", text: "Undo ho gaya. Dobara likhna ho to boliye.", status: "complete" },
+      ]);
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : "Undo nahi hua.");
+    } finally {
+      setUndoBusy(false);
+    }
+  }, []);
 
   const recording = ptt.status === "recording";
   const canSend = input.trim() && !busy && !locked;
@@ -243,37 +286,42 @@ export function ConversationScreen({ mode }: { mode: Mode }) {
           </div>
         )}
 
-        {messages.map((m) => (
-          <div
-            key={m.id}
-            className={cn(
-              "flex animate-[fadeSlideIn_0.2s_ease-out_forwards]",
-              m.role === "user" ? "justify-end" : "justify-start",
-            )}
-          >
+        {messages.map((m) => {
+          const rtl = isRtl(m.text);
+          return (
             <div
+              key={m.id}
               className={cn(
-                "max-w-[80%] rounded-2xl px-3.5 py-2 text-[0.9375rem] leading-relaxed whitespace-pre-wrap",
-                m.role === "user"
-                  ? "rounded-br-sm bg-primary text-primary-foreground"
-                  : m.status === "error"
-                    ? "rounded-bl-sm bg-destructive/10 text-destructive"
-                    : "rounded-bl-sm bg-card border border-border",
+                "flex animate-[fadeSlideIn_0.2s_ease-out_forwards]",
+                m.role === "user" ? "justify-end" : "justify-start",
               )}
             >
-              {m.text || (m.status === "streaming" ? "…" : "")}
-              {m.role === "assistant" && m.channel === "voice" && m.text && (
-                <button
-                  onClick={() => speech.speak(m.id, m.text)}
-                  className="ml-2 inline-flex align-middle text-muted-foreground"
-                  aria-label="Dobara sunein"
-                >
-                  <Volume2 className="size-3.5" />
-                </button>
-              )}
+              <div
+                dir={rtl ? "rtl" : "ltr"}
+                lang={rtl ? "ur" : undefined}
+                className={cn(
+                  "max-w-[80%] rounded-2xl px-3.5 py-2 text-[0.9375rem] leading-relaxed whitespace-pre-wrap",
+                  m.role === "user"
+                    ? "rounded-br-sm bg-primary text-primary-foreground"
+                    : m.status === "error"
+                      ? "rounded-bl-sm bg-destructive/10 text-destructive"
+                      : "rounded-bl-sm bg-card border border-border",
+                )}
+              >
+                {m.text || (m.status === "streaming" ? "…" : "")}
+                {m.role === "assistant" && m.channel === "voice" && m.text && (
+                  <button
+                    onClick={() => speech.speak(m.id, m.text)}
+                    className="ml-2 inline-flex align-middle text-muted-foreground"
+                    aria-label="Dobara sunein"
+                  >
+                    <Volume2 className="size-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
 
         {card && (
           <div className="animate-[fadeSlideIn_0.2s_ease-out_forwards]">
@@ -285,6 +333,8 @@ export function ConversationScreen({ mode }: { mode: Mode }) {
                 setCard(null);
                 proposalRef.current = null;
               }}
+              onUndo={card.status === "recorded" ? undoAction : undefined}
+              undoBusy={undoBusy}
             />
           </div>
         )}

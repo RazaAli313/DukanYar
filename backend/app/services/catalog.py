@@ -56,6 +56,89 @@ def resolve_product(*, shop_id: str, term: str) -> dict[str, Any] | None:
     return exact_name or exact_alias or part_name or part_alias
 
 
+def find_candidates(*, shop_id: str, term: str, limit: int = 5) -> list[dict[str, Any]]:
+    """Return up to *limit* products that partially match *term*.
+
+    Used by record_sale for SALE-2 disambiguation: when resolve_product returns
+    None, we surface near-matches so the model can ask the shopkeeper to clarify.
+    """
+    t = _norm(term)
+    if not t:
+        return []
+
+    sb = get_supabase()
+    products = (
+        sb.table("products")
+        .select(f"{_PROD_COLS},product_aliases(alias)")
+        .eq("shop_id", shop_id)
+        .execute()
+        .data
+    )
+
+    matches: list[dict[str, Any]] = []
+    for p in products:
+        name = _norm(p["name"])
+        aliases = [_norm(a["alias"]) for a in (p.get("product_aliases") or []) if a.get("alias")]
+        row = {k: p[k] for k in _PROD_COLS.split(",")}
+        # Include any row where name or alias is a partial match
+        if (
+            t in name
+            or name in t
+            or any(t in a or a in t for a in aliases)
+        ):
+            matches.append(row)
+        if len(matches) >= limit:
+            break
+
+    return matches
+
+
+def update_product(*, shop_id: str, product_id: str, **fields: Any) -> dict[str, Any] | None:
+    """Patch a product row and return the updated record.
+
+    Only provided *fields* are updated (e.g. stock, sale_price, cost_price).
+    Returns None if the product was not found in this shop.
+    """
+    sb = get_supabase()
+    result = (
+        sb.table("products")
+        .update(fields)
+        .eq("id", product_id)
+        .eq("shop_id", shop_id)
+        .execute()
+        .data
+    )
+    if not result:
+        return None
+    return {k: result[0][k] for k in _PROD_COLS.split(",") if k in result[0]}
+
+
+def add_product(
+    *,
+    shop_id: str,
+    name: str,
+    sale_price: float,
+    cost_price: float = 0.0,
+    stock: int = 0,
+    unit: str | None = None,
+) -> dict[str, Any]:
+    """Insert a new product and return the created row."""
+    sb = get_supabase()
+    row: dict[str, Any] = {
+        "shop_id": shop_id,
+        "name": name.strip(),
+        "sale_price": round(sale_price, 2),
+        "cost_price": round(cost_price, 2),
+        "stock": stock,
+    }
+    if unit:
+        row["unit"] = unit.strip()
+    result = sb.table("products").insert(row).execute().data
+    if not result:
+        raise ValueError("Product insert returned no row.")
+    return {k: result[0][k] for k in _PROD_COLS.split(",") if k in result[0]}
+
+
 def list_products(*, shop_id: str) -> list[dict[str, Any]]:
     return (
         get_supabase()

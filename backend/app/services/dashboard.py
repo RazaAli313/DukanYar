@@ -13,15 +13,12 @@ from app.db import get_supabase
 
 _LOW_STOCK_THRESHOLD = 5
 
-#: Flat profit margin applied to sale totals (stated-total primacy — SALE-3).
-PROFIT_MARGIN = 0.08
-
 
 def today_snapshot(*, shop_id: str) -> dict[str, Any]:
     sb = get_supabase()
     today = date.today().isoformat()
 
-    # ── today's sales + profit ───────────────────────────────────────────────
+    # ── today's sales ────────────────────────────────────────────────────────
     sales = (
         sb.table("sales")
         .select("id,total_amount,payment_type,created_at")
@@ -30,15 +27,30 @@ def today_snapshot(*, shop_id: str) -> dict[str, Any]:
         .execute()
         .data
     )
+    sale_ids = [s["id"] for s in sales]
     total_sale = round(sum(float(s["total_amount"]) for s in sales), 2)
     udhaar_today = round(
         sum(float(s["total_amount"]) for s in sales if s["payment_type"] in ("udhaar", "split")),
         2,
     )
 
-    # Profit is a flat margin on the stated sale total — the shopkeeper's spoken
-    # amount is the source of truth, not a per-item cost roll-up.
-    profit = round(total_sale * PROFIT_MARGIN, 2)
+    # Profit = Σ (sale_price - cost_price) × quantity for today's sold_items.
+    # This is COGS-based, not a flat margin (RPT-2).
+    profit = 0.0
+    if sale_ids:
+        sold_items = (
+            sb.table("sold_items")
+            .select("quantity,unit_price,products(cost_price)")
+            .in_("sale_id", sale_ids)
+            .execute()
+            .data
+        )
+        for item in sold_items:
+            cost = float((item.get("products") or {}).get("cost_price") or 0)
+            price = float(item.get("unit_price") or 0)
+            qty = int(item.get("quantity") or 0)
+            profit += (price - cost) * qty
+    profit = round(profit, 2)
 
     # ── today's expenses ─────────────────────────────────────────────────────
     expenses = (

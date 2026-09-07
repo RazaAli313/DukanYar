@@ -42,6 +42,16 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return json as T;
 }
 
+async function del<T>(path: string): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${await token()}` },
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((json as { detail?: string }).detail || `Error ${res.status}`);
+  return json as T;
+}
+
 // ── types ────────────────────────────────────────────────────────────────────
 
 export interface DashboardToday {
@@ -127,4 +137,12 @@ export const api = {
     cnic?: string | null;
     new_customer?: boolean;
   }) => post<SaleConfirmResult>("/conversations/udhaar/confirm", body),
+
+  // ── undo endpoints (TOOL-3 / TOOL-4) ──────────────────────────────────────
+  undoSale: (saleId: string) =>
+    del<{ ok: boolean; sale_id: string }>(`/conversations/sale/${saleId}`),
+  deleteExpense: (expenseId: string) =>
+    del<{ ok: boolean; expense_id: string }>(`/conversations/expense/${expenseId}`),
+  undoUdhaar: (entryId: string) =>
+    del<{ ok: boolean; entry_id: string }>(`/conversations/udhaar/${entryId}`),
 };

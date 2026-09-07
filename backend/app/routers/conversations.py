@@ -31,12 +31,13 @@ from app.services import catalog, expenses, sale
 from app.services import khata as khata_svc
 from app.services import conversations as convo
 from app.services import llm
+from app.tools.registry import get_registry
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-Mode = Literal["sale", "udhaar", "kharcha", "ask"]
+Mode = Literal["sale", "udhaar", "kharcha", "ask", "maal"]
 
 
 class Turn(BaseModel):
@@ -317,6 +318,39 @@ async def send_message(conversation_id: str, body: MessageRequest, user: Current
     )
     turns = prior + [{"role": "user", "content": user_text}]
 
+    # Execution context passed to every tool handler.
+    tool_ctx = {"shop_id": user.shop_id, "user_id": user.user_id}
+
+    async def _run_tools(tool_calls: list, ctx: dict) -> list[dict]:
+        """Execute tool calls returned by the model and collect results."""
+        registry = get_registry()
+        results: list[dict] = []
+        for tc in tool_calls:
+            fn = tc.function
+            tool_def = registry.get(fn.name)
+            if tool_def is None:
+                results.append({
+                    "tool_call_id": tc.id,
+                    "role": "tool",
+                    "content": json.dumps({"ok": False, "error": f"Unknown tool: {fn.name}"}),
+                })
+                continue
+            try:
+                params = json.loads(fn.arguments or "{}")
+            except json.JSONDecodeError:
+                params = {}
+            try:
+                result = await tool_def.handler(params, ctx)
+            except Exception as exc:
+                logger.exception("Tool handler %s raised", fn.name)
+                result = {"ok": False, "error": str(exc)}
+            results.append({
+                "tool_call_id": tc.id,
+                "role": "tool",
+                "content": json.dumps(result),
+            })
+        return results
+
     async def event_stream():
         chunks: list[str] = []
 
@@ -351,7 +385,83 @@ async def send_message(conversation_id: str, body: MessageRequest, user: Current
             yield _sse("done", {"conversation_id": conv_id})
             return
 
-        # ── every other mode: normal streamed reply ─────────────────────────
+        # ── tool-capable modes: ask / maal — agentic loop (TOOL-2) ──────────
+        if body.mode in ("ask", "maal"):
+            registry = get_registry()
+            mode_tools = registry.schemas(mode=body.mode)
+
+            if mode_tools:
+                # --- round 1: let model decide whether to call a tool ----------
+                try:
+                    msg = await llm.tool_call_reply(
+                        turns, mode_tools, channel=body.channel, mode=body.mode
+                    )
+                except (APIError, APITimeoutError) as exc:
+                    yield _sse("error", {"detail": f"LLM error: {exc}"})
+                    return
+
+                if msg.tool_calls:
+                    # Emit a brief "thinking" indicator so the UI isn't blank.
+                    yield _sse("delta", {"text": ""})
+
+                    # Run all tool calls in parallel where possible.
+                    tool_results = await _run_tools(msg.tool_calls, tool_ctx)
+
+                    # Emit a tool_result SSE so the frontend can show intermediate cards.
+                    for tr in tool_results:
+                        try:
+                            payload = json.loads(tr["content"])
+                            yield _sse("tool_result", {
+                                "tool_call_id": tr["tool_call_id"],
+                                "result": payload,
+                            })
+                        except Exception:
+                            pass
+
+                    # --- round 2: feed results back, stream the final answer ---
+                    # Build the follow-up message list:
+                    #   prior turns + assistant tool-call message + tool result messages
+                    followup_turns = list(turns) + [
+                        {
+                            "role": "assistant",
+                            "content": msg.content or "",
+                            "tool_calls": [
+                                {
+                                    "id": tc.id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": tc.function.name,
+                                        "arguments": tc.function.arguments,
+                                    },
+                                }
+                                for tc in msg.tool_calls
+                            ],
+                        }
+                    ] + tool_results
+                    try:
+                        async for delta in llm.stream_reply(
+                            followup_turns, channel=body.channel, mode=body.mode
+                        ):
+                            chunks.append(delta)
+                            yield _sse("delta", {"text": delta})
+                    except (APIError, APITimeoutError) as exc:
+                        persist("".join(chunks), convo.STATUS_FAILED)
+                        yield _sse("error", {"detail": f"LLM error: {exc}"})
+                        return
+
+                    persist("".join(chunks), convo.STATUS_COMPLETE)
+                    yield _sse("done", {"conversation_id": conv_id})
+                    return
+
+                # Model chose NOT to call a tool — stream whatever it said.
+                if msg.content:
+                    for word in (msg.content or "").split(" "):
+                        yield _sse("delta", {"text": word + " "})
+                    persist(msg.content, convo.STATUS_COMPLETE)
+                    yield _sse("done", {"conversation_id": conv_id})
+                    return
+
+        # ── fallback: normal streamed reply ──────────────────────────────────
         try:
             async for delta in llm.stream_reply(turns, channel=body.channel, mode=body.mode):
                 chunks.append(delta)
@@ -575,6 +685,53 @@ def confirm_udhaar(body: UdhaarConfirmRequest, user: CurrentUserDep) -> dict[str
             "note": reg_note,
         },
     }
+
+
+# ── undo endpoints (TOOL-3 / TOOL-4) ─────────────────────────────────────────
+
+@router.delete("/sale/{sale_id}")
+def undo_sale_endpoint(sale_id: str, user: CurrentUserDep) -> dict[str, Any]:
+    """Reverse a committed sale and restore stock."""
+    removed = sale.reverse_sale(shop_id=user.shop_id, sale_id=sale_id)
+    if not removed:
+        raise HTTPException(404, "Ye sale nahi mili ya pehle se wapas ho chuki hai.")
+    conv = convo.get_or_create_conversation(shop_id=user.shop_id, user_id=user.user_id)
+    convo.add_message(
+        conversation_id=conv["id"],
+        sender=convo.SENDER_ASSISTANT,
+        content="Sale wapas ho gayi. Stock restore kar diya.",
+    )
+    return {"ok": True, "sale_id": sale_id}
+
+
+@router.delete("/expense/{expense_id}")
+def delete_expense_endpoint(expense_id: str, user: CurrentUserDep) -> dict[str, Any]:
+    """Delete a committed expense."""
+    removed = expenses.delete_expense(shop_id=user.shop_id, expense_id=expense_id)
+    if not removed:
+        raise HTTPException(404, "Ye kharcha nahi mila ya pehle se hata diya gaya tha.")
+    conv = convo.get_or_create_conversation(shop_id=user.shop_id, user_id=user.user_id)
+    convo.add_message(
+        conversation_id=conv["id"],
+        sender=convo.SENDER_ASSISTANT,
+        content="Kharcha wapas ho gaya.",
+    )
+    return {"ok": True, "expense_id": expense_id}
+
+
+@router.delete("/udhaar/{entry_id}")
+def undo_udhaar_endpoint(entry_id: str, user: CurrentUserDep) -> dict[str, Any]:
+    """Reverse a ledger entry (udhaar or payment)."""
+    removed = khata_svc.reverse_ledger_entry(shop_id=user.shop_id, entry_id=entry_id)
+    if not removed:
+        raise HTTPException(404, "Ye entry nahi mili ya pehle se hata di gayi thi.")
+    conv = convo.get_or_create_conversation(shop_id=user.shop_id, user_id=user.user_id)
+    convo.add_message(
+        conversation_id=conv["id"],
+        sender=convo.SENDER_ASSISTANT,
+        content="Udhaar entry wapas ho gayi.",
+    )
+    return {"ok": True, "entry_id": entry_id}
 
 
 # ── history ──────────────────────────────────────────────────────────────────

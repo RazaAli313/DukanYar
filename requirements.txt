@@ -1,0 +1,11 @@
+# Python dependencies for Vercel's serverless builder.
+# Keep in sync with backend/pyproject.toml.
+# Vercel reads this file from the repo root when building api/index.py.
+
+edge-tts>=6.1
+fastapi[standard]>=0.141.1
+httpx>=0.27
+mangum>=0.17.0
+openai>=1.0.0
+pydantic-settings>=2.15.0
+supabase>=2.31.0
