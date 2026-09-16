@@ -1,0 +1,6 @@
+# Don't ship these to Vercel's build environment
+backend/.env
+frontend/.env.local
+.git
+mockups
+docs
