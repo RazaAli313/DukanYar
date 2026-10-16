@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.services import khata as khata_svc
+from app.tools.cards import card_base, money
 from app.tools.registry import ToolDefinition, get_registry
 
 _PARAMETERS: dict[str, Any] = {
@@ -27,6 +28,13 @@ _PARAMETERS: dict[str, Any] = {
         "customer_name": {
             "type": ["string", "null"],
             "description": "Customer name to search if khata_number is unknown.",
+        },
+        "cnic": {
+            "type": ["string", "null"],
+            "description": (
+                "13-digit CNIC. Required with customer_name only when the customer "
+                "is new; the tool registers the khata before logging udhaar."
+            ),
         },
         "sale_id": {
             "type": ["string", "null"],
@@ -65,9 +73,27 @@ async def _handler(params: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any
         )
         customer = rows[0] if rows else None
 
+    customer_created = False
+    if not customer and customer_name and params.get("cnic"):
+        try:
+            customer = khata_svc.register_customer(
+                shop_id=shop_id,
+                name=customer_name,
+                cnic=str(params["cnic"]),
+            )
+            customer_created = True
+        except khata_svc.DuplicateCustomerError as exc:
+            customer = exc.customer
+        except khata_svc.KhataError as exc:
+            return {"ok": False, "reply": str(exc)}
+
     if not customer:
         who = f"Khata #{khata_number}" if khata_number else (customer_name or "Ye customer")
-        return {"ok": False, "reply": f"{who} ka record nahi mila. Pehle register karein."}
+        suffix = " Naam ke saath 13-digit CNIC bhi batayein." if customer_name else ""
+        return {
+            "ok": False,
+            "reply": f"{who} ka record nahi mila.{suffix or ' Pehle register karein.'}",
+        }
 
     try:
         res = khata_svc.log_udhaar(
@@ -78,16 +104,62 @@ async def _handler(params: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any
             created_by=user_id,
         )
     except khata_svc.KhataError as exc:
+        if customer_created:
+            khata_svc.delete_customer(
+                shop_id=shop_id, customer_id=customer["id"]
+            )
         return {"ok": False, "reply": str(exc)}
 
     who = customer.get("name") or f"Khata #{customer.get('khata_number')}"
     return {
         "ok": True,
         "entry_id": res["entry"]["id"],
+        "customer_id": customer["id"],
+        "customer_name": who,
+        "customer_created": customer_created,
         "khata_number": customer.get("khata_number"),
         "new_balance": res["balance"],
         "reply": f"{who} ko ₨ {int(float(amount))} udhaar likh diya. Naya balance ₨ {int(res['balance'])}.",
     }
+
+
+def _present(
+    *, params: dict[str, Any], result: dict[str, Any], tool_call_id: str, status: str
+) -> dict[str, Any]:
+    who = (
+        f"Khata #{params['khata_number']}"
+        if params.get("khata_number")
+        else params.get("customer_name") or "Customer"
+    )
+    card = {
+        **card_base(
+            tool_name="log_udhaar",
+            tool_call_id=tool_call_id,
+            status=status,
+            result=result,
+            undoable=status == "recorded",
+        ),
+        "kind": "udhaar",
+        "title": "Naya Udhaar",
+        "lines": [{"label": who, "value": ""}],
+        "total": money(float(params.get("amount") or 0)),
+    }
+    if result.get("customer_created") and status == "recorded":
+        card["note"] = "Naya khata ban gaya."
+    return card
+
+
+def _undo(*, result: dict[str, Any], ctx: dict[str, Any]) -> bool:
+    entry_id = result.get("entry_id")
+    if not entry_id or not khata_svc.reverse_ledger_entry(
+        shop_id=ctx["shop_id"], entry_id=entry_id
+    ):
+        return False
+    if result.get("customer_created") and result.get("customer_id"):
+        return khata_svc.delete_customer(
+            shop_id=ctx["shop_id"], customer_id=result["customer_id"]
+        )
+    return True
 
 
 get_registry().register(ToolDefinition(
@@ -98,6 +170,7 @@ get_registry().register(ToolDefinition(
     ),
     parameters=_PARAMETERS,
     risk_tier="commit_undo",
-    modes=["udhaar"],
     handler=_handler,
+    presenter=_present,
+    undo=_undo,
 ))

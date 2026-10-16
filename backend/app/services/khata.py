@@ -192,6 +192,20 @@ def list_customers(*, shop_id: str, limit: int = 50) -> list[dict[str, Any]]:
     return out
 
 
+def delete_customer(*, shop_id: str, customer_id: str) -> bool:
+    """Delete a shop-scoped customer, used to reverse an inline registration."""
+    deleted = (
+        get_supabase()
+        .table("customers")
+        .delete()
+        .eq("id", customer_id)
+        .eq("shop_id", shop_id)
+        .execute()
+        .data
+    )
+    return bool(deleted)
+
+
 # ── ledger (KHATA-2, KHATA-3) ───────────────────────────────────────────────
 
 def _new_ledger_entry(

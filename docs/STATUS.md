@@ -3,6 +3,10 @@
 _As of 2026-09-03. Branch `feat/text3-persistence` (has **everything**: TEXT/VOICE +
 EXPENSE/KHATA + TEXT-3 persistence + the shopkeeper UI + SALE/KHATA/EXP tools)._
 
+> Historical snapshot. For the current implementation and deployment decision,
+> see [`codebase-product-overview.md`](codebase-product-overview.md) and
+> [`../VERCEL_DEPLOY.md`](../VERCEL_DEPLOY.md).
+
 ## TL;DR
 
 - **Working end-to-end today:** login → dashboard → pick a mode → speak/type →
@@ -23,7 +27,7 @@ Legend: ✅ done · 🟡 partial · ❌ not started
 ### FND — Foundation
 | Ticket | Status | Notes |
 |---|---|---|
-| FND-1 monorepo + CI + deploy | 🟡 | Repo ✅, CI workflow ✅, LICENSE ✅. **Not deployed** (needs Vercel + Render/Railway). |
+| FND-1 monorepo + CI + deploy | 🟡 | Repo ✅, CI workflow ✅, LICENSE ✅. **Not deployed**; this snapshot's deployment plan has been superseded by the current guide. |
 | FND-2 Phase-1 schema | ✅ | shops/roles/profiles/conversations/messages exist. |
 | FND-3 app shell + PWA + config | 🟡 | App shell ✅ (bottom nav, one layout, theme). **No PWA** (manifest/service worker). Config centralised ✅. |
 
@@ -113,7 +117,7 @@ Legend: ✅ done · 🟡 partial · ❌ not started
 **Blockers for a clean demo**
 1. **Fix signup** (AUTH-1) — INSERT → UPDATE in `auth.ts`, or the admin-client path. Sheheryar's `feat/fnd-supabase-auth` PR was heading here but doesn't compile and still INSERTs.
 2. **Live browser shakeout** of the new UI — click every screen as `demo@dukanyar.com`, fix wiring/visual bugs.
-3. **Deploy** — frontend to Vercel, backend to Render/Railway (CORS already configured).
+3. **Deploy** — this snapshot's split-host plan is superseded; see `../VERCEL_DEPLOY.md`.
 
 **High value, not blocking**
 4. Undo buttons on the confirmation cards (services already exist — TOOL-3).

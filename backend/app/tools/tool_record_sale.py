@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.services import catalog, sale as sale_svc
+from app.tools.cards import card_base, money
 from app.tools.registry import ToolDefinition, get_registry
 
 _PARAMETERS: dict[str, Any] = {
@@ -60,6 +61,15 @@ async def _handler(params: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any
         qty = int(it.get("quantity") or 1)
         product = catalog.resolve_product(shop_id=shop_id, term=name)
         if product:
+            if float(product.get("cost_price") or 0) <= 0:
+                return {
+                    "ok": False,
+                    "needs_clarification": True,
+                    "reply": (
+                        f"{product['name']} ka purchase cost missing hai. "
+                        "Sale se pehle MAAL mein cost price update karein."
+                    ),
+                }
             resolved.append({
                 "product_id": product["id"],
                 "name": product["name"],
@@ -126,6 +136,40 @@ async def _handler(params: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any
     }
 
 
+def _present(
+    *, params: dict[str, Any], result: dict[str, Any], tool_call_id: str, status: str
+) -> dict[str, Any]:
+    return {
+        **card_base(
+            tool_name="record_sale",
+            tool_call_id=tool_call_id,
+            status=status,
+            result=result,
+            undoable=status == "recorded",
+        ),
+        "kind": "sale",
+        "title": "Naya Sale",
+        "lines": [
+            {
+                "label": f"{item.get('name', 'Item')} × {item.get('quantity', 1)}",
+                "value": "",
+            }
+            for item in params.get("items") or []
+        ],
+        "total": money(
+            float(params.get("stated_total") or result.get("total_amount") or 0)
+        ),
+    }
+
+
+def _undo(*, result: dict[str, Any], ctx: dict[str, Any]) -> bool:
+    sale_id = result.get("sale_id")
+    return bool(
+        sale_id
+        and sale_svc.reverse_sale(shop_id=ctx["shop_id"], sale_id=sale_id)
+    )
+
+
 get_registry().register(ToolDefinition(
     name="record_sale",
     description=(
@@ -135,6 +179,7 @@ get_registry().register(ToolDefinition(
     ),
     parameters=_PARAMETERS,
     risk_tier="commit_undo",
-    modes=["sale"],
     handler=_handler,
+    presenter=_present,
+    undo=_undo,
 ))

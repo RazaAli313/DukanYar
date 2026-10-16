@@ -12,6 +12,7 @@ import pytest
 
 from app.config import settings
 from app.db import get_supabase
+from app.services import catalog, sale
 from app.services import khata as K
 
 pytestmark = pytest.mark.skipif(
@@ -21,6 +22,49 @@ pytestmark = pytest.mark.skipif(
 
 CNIC_A = "12345-1234567-1"
 CNIC_B = "42101-7654321-9"
+
+
+def test_undo_udhaar_sale_restores_stock_and_removes_sale_debt(shop_id):
+    customer = K.register_customer(
+        shop_id=shop_id,
+        name="Atomic Sale Customer",
+        cnic="3520211122233",
+    )
+    product = catalog.add_product(
+        shop_id=shop_id,
+        name="Atomic Test Item",
+        sale_price=300,
+        cost_price=200,
+        stock=5,
+    )
+    recorded = sale.record_sale(
+        shop_id=shop_id,
+        items=[
+            {
+                "product_id": product["id"],
+                "quantity": 1,
+                "unit_price": 300,
+            }
+        ],
+        total_amount=300,
+        payment_type="udhaar",
+        customer_id=customer["id"],
+    )
+
+    assert K.customer_balance(
+        shop_id=shop_id, customer_id=customer["id"]
+    ) == 300
+    assert catalog.resolve_product(
+        shop_id=shop_id, term="Atomic Test Item"
+    )["stock"] == 4
+
+    assert sale.reverse_sale(shop_id=shop_id, sale_id=recorded["sale_id"]) is True
+    assert K.customer_balance(
+        shop_id=shop_id, customer_id=customer["id"]
+    ) == 0
+    assert catalog.resolve_product(
+        shop_id=shop_id, term="Atomic Test Item"
+    )["stock"] == 5
 
 
 @pytest.fixture

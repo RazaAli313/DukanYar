@@ -67,7 +67,6 @@ get_registry().register(ToolDefinition(
         "'kya mangwana chahiye', etc."
     ),
     parameters=_PARAMETERS,
-    risk_tier="commit_undo",  # read-only; tier is for classification only
-    modes=["ask"],
+    risk_tier="read_only",
     handler=_handler,
 ))

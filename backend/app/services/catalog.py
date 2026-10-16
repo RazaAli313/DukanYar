@@ -118,11 +118,12 @@ def add_product(
     shop_id: str,
     name: str,
     sale_price: float,
-    cost_price: float = 0.0,
+    cost_price: float,
     stock: int = 0,
-    unit: str | None = None,
 ) -> dict[str, Any]:
     """Insert a new product and return the created row."""
+    if cost_price <= 0:
+        raise ValueError("Purchase cost must be greater than zero.")
     sb = get_supabase()
     row: dict[str, Any] = {
         "shop_id": shop_id,
@@ -131,12 +132,24 @@ def add_product(
         "cost_price": round(cost_price, 2),
         "stock": stock,
     }
-    if unit:
-        row["unit"] = unit.strip()
     result = sb.table("products").insert(row).execute().data
     if not result:
         raise ValueError("Product insert returned no row.")
     return {k: result[0][k] for k in _PROD_COLS.split(",") if k in result[0]}
+
+
+def delete_product(*, shop_id: str, product_id: str) -> bool:
+    """Remove a product created by a reversible catalog action."""
+    deleted = (
+        get_supabase()
+        .table("products")
+        .delete()
+        .eq("id", product_id)
+        .eq("shop_id", shop_id)
+        .execute()
+        .data
+    )
+    return bool(deleted)
 
 
 def list_products(*, shop_id: str) -> list[dict[str, Any]]:

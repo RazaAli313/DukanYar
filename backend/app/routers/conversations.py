@@ -1,20 +1,19 @@
-"""Conversations router — TEXT-2 streaming, TEXT-3 persistence, TEXT-5 modes.
+"""Conversation transport for the unified LLM tool orchestration loop.
 
 POST /conversations/{conversation_id}/messages  send a message, stream the reply
-POST /conversations/sale/confirm                execute a proposed sale
+POST /conversations/actions/{id}/confirm        execute an approval-gated tool
+POST /conversations/actions/{id}/reject         reject an approval-gated tool
+DELETE /conversations/actions/{id}              undo a committed tool
 GET  /conversations/history                     reload the thread
 
 Auth: ``Authorization: Bearer <supabase access token>``; the shop is resolved
 from the profile, never the body. The conversation is the shop's single thread;
 the path id is ignored.
 
-The shopkeeper picks the mode on the dashboard (``sale`` | ``udhaar`` |
-``kharcha`` | ``ask``), so the assistant never classifies intent. For ``sale``
-the model does a structured parse and the router emits an ``action`` card the
-shopkeeper confirms; every other mode is a normal streamed reply.
+Dashboard modes are prompt hints only. The model always sees the complete tool
+registry and decides which tool or sequence of tools matches the request.
 """
 
-import asyncio
 import json
 import logging
 from typing import Any, Literal
@@ -26,11 +25,9 @@ from pydantic import BaseModel, Field
 
 from app.auth import CurrentUserDep
 from app.config import settings
-from app.db import get_supabase
-from app.services import catalog, expenses, sale
-from app.services import khata as khata_svc
 from app.services import conversations as convo
 from app.services import llm
+from app.services import tool_calls as tool_call_store
 from app.tools.registry import get_registry
 
 logger = logging.getLogger(__name__)
@@ -54,237 +51,8 @@ class MessageRequest(BaseModel):
     recent_turns: list[Turn] = Field(default_factory=list, deprecated=True)
 
 
-class SaleLine(BaseModel):
-    name: str
-    quantity: int
-
-
-class SaleConfirmRequest(BaseModel):
-    items: list[SaleLine]
-    stated_total: float
-    payment: Literal["cash", "udhaar"] = "cash"
-    khata_number: int | None = None
-
-
-class ExpenseConfirmRequest(BaseModel):
-    amount: float
-    desc: str | None = None
-
-
-class UdhaarConfirmRequest(BaseModel):
-    amount: float
-    kind: Literal["udhaar", "payment"] = "udhaar"
-    khata_number: int | None = None
-    customer_name: str | None = None
-    #: Set when registering a brand-new credit customer in the same step.
-    cnic: str | None = None
-    new_customer: bool = False
-
-
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
-
-
-def _money(n: float) -> str:
-    return f"₨ {int(round(n)):,}"
-
-
-def _sale_card(
-    status: str, resolved: list[dict], stated_total: float, note: str | None = None
-) -> dict:
-    # Stated-total primacy (SALE-3): the shopkeeper's spoken amount is the truth,
-    # so line items show the name + quantity only — never a per-item price.
-    lines = []
-    for r in resolved:
-        product = r.get("product")
-        if product:
-            lines.append({"label": f"{product['name']} × {r['quantity']}", "value": ""})
-        else:
-            lines.append(
-                {
-                    "label": f"{r['name']} × {r['quantity']}",
-                    "value": "nahi mila",
-                    "flag": True,
-                }
-            )
-    return {
-        "kind": "sale",
-        "status": status,
-        "title": "Naya Sale",
-        "lines": lines,
-        "total": _money(stated_total),
-        "note": note,
-    }
-
-
-def _resolve_items(shop_id: str, items: list[dict]) -> list[dict]:
-    out = []
-    for it in items:
-        product = catalog.resolve_product(shop_id=shop_id, term=it.get("name", ""))
-        out.append(
-            {
-                "name": it.get("name", ""),
-                "quantity": int(it.get("quantity", 1)),
-                "product": product,
-            }
-        )
-    return out
-
-
-def _udhaar_lookup(
-    shop_id: str, khata: int | None, name: str | None, cnic: str | None
-) -> str:
-    """Resolve a customer and read back their balance. Read-only (KHATA-4)."""
-    customer = None
-    if khata:
-        customer = khata_svc.find_customer(shop_id=shop_id, khata_number=khata)
-    if customer is None and cnic:
-        try:
-            customer = khata_svc.find_customer(shop_id=shop_id, cnic=cnic)
-        except khata_svc.KhataError:
-            customer = None
-    if customer is None and name:
-        rows = (
-            get_supabase()
-            .table("customers")
-            .select("id,khata_number,name")
-            .eq("shop_id", shop_id)
-            .ilike("name", f"%{name}%")
-            .limit(1)
-            .execute()
-            .data
-        )
-        customer = rows[0] if rows else None
-
-    if customer is None:
-        which = f"Khata #{khata}" if khata else (name or "Ye customer")
-        return f"{which} ka koi record nahi mila."
-
-    balance = khata_svc.customer_balance(shop_id=shop_id, customer_id=customer["id"])
-    who = customer.get("name") or f"Khata #{customer.get('khata_number')}"
-    if balance > 0:
-        return f"{who} (khata #{customer.get('khata_number')}) ke zimme {_money(balance)} udhaar hai."
-    if balance < 0:
-        return f"{who} ka {_money(-balance)} advance jama hai."
-    return f"{who} (khata #{customer.get('khata_number')}) ka koi udhaar baqaya nahi."
-
-
-async def _parse_record(
-    mode: str, shop_id: str, turns: list[dict]
-) -> tuple[dict | None, str]:
-    """Parse a record-mode message -> (action card | None, reply text)."""
-    if mode == "sale":
-        p = await llm.extract_sale(turns)
-        reply = str(p.get("reply") or "Theek hai?")
-        if p.get("action") != "propose" or not p.get("items"):
-            return None, reply
-        resolved = _resolve_items(shop_id, p["items"])
-        total = float(p.get("stated_total") or 0)
-        card = _sale_card("proposed", resolved, total)
-        is_udhaar = bool(p.get("khata_number")) or p.get("payment") == "udhaar"
-        card["payment"] = "udhaar" if is_udhaar else "cash"
-        card["khata_number"] = p.get("khata_number")
-        card["_items"] = [{"name": r["name"], "quantity": r["quantity"]} for r in resolved]
-        card["_stated_total"] = total
-        return card, reply
-
-    if mode == "kharcha":
-        p = await llm.extract_expense(turns)
-        reply = str(p.get("reply") or "Theek hai?")
-        amount = p.get("amount")
-        if p.get("action") != "propose" or not amount:
-            return None, reply
-        note = str(p.get("note") or "Kharcha")
-        card = {
-            "kind": "kharcha",
-            "status": "proposed",
-            "title": "Naya Kharcha",
-            "lines": [{"label": note, "value": ""}],
-            "total": _money(float(amount)),
-            "note": None,
-            "_amount": float(amount),
-            "_desc": note,
-        }
-        return card, reply
-
-    if mode == "udhaar":
-        p = await llm.extract_udhaar(turns)
-        reply = str(p.get("reply") or "Theek hai?")
-        amount = p.get("amount")
-        khata = p.get("khata_number")
-        name = (p.get("customer_name") or "").strip() or None
-        cnic_raw = (p.get("cnic") or "").strip() or None
-        is_payment = p.get("kind") == "payment"
-
-        # ── lookup: read-only balance / customer info (KHATA-4) ──────────────
-        if p.get("action") == "lookup":
-            return None, _udhaar_lookup(shop_id, khata, name, cnic_raw)
-
-        if p.get("action") != "propose" or not amount or not (khata or name):
-            return None, reply
-
-        # Find an existing customer.
-        existing = None
-        if khata:
-            existing = khata_svc.find_customer(shop_id=shop_id, khata_number=khata)
-        elif cnic_raw:
-            try:
-                existing = khata_svc.find_customer(shop_id=shop_id, cnic=cnic_raw)
-            except khata_svc.KhataError:
-                existing = None
-        if existing is None and name:
-            rows = (
-                get_supabase()
-                .table("customers")
-                .select("id,khata_number,name,cnic")
-                .eq("shop_id", shop_id)
-                .ilike("name", f"%{name}%")
-                .limit(1)
-                .execute()
-                .data
-            )
-            existing = rows[0] if rows else None
-
-        new_customer = False
-        if existing:
-            who = existing["name"] or f"Khata #{existing['khata_number']}"
-        elif is_payment:
-            # Cannot repay a khata that does not exist.
-            return None, (
-                f"{name} abhi registered nahi hain. Pehle unka udhaar likhein."
-            )
-        else:
-            # New customer path — need name + a valid 13-digit CNIC.
-            digits = "".join(ch for ch in (cnic_raw or "") if ch.isdigit())
-            if len(digits) != 13:
-                return None, (
-                    f"{name} naya customer hai. Unki CNIC bhi batayein "
-                    f"(13 digits, jaise 12345-1234567-1)."
-                )
-            new_customer = True
-            who = f"{name} (naya khata)"
-
-        card = {
-            "kind": "udhaar",
-            "status": "proposed",
-            "title": "Udhaar wapsi" if is_payment else "Naya Udhaar",
-            "lines": [{"label": who, "value": ""}],
-            "total": _money(float(amount)),
-            "note": (
-                "Wapsi confirm karne se pehle check kar lein."
-                if is_payment
-                else ("Naya khata banega." if new_customer else None)
-            ),
-            "_amount": float(amount),
-            "_kind": "payment" if is_payment else "udhaar",
-            "_khata_number": existing["khata_number"] if existing else None,
-            "_customer_name": name,
-            "_cnic": cnic_raw if new_customer else None,
-            "_new": new_customer,
-        }
-        return card, reply
-
-    return None, "Theek hai?"
 
 
 # ── send a message ───────────────────────────────────────────────────────────
@@ -307,7 +75,7 @@ async def send_message(conversation_id: str, body: MessageRequest, user: Current
     if body.channel == "voice":
         user_text = await llm.to_roman_urdu(body.text)
 
-    convo.add_message(
+    user_message = convo.add_message(
         conversation_id=conv_id,
         sender=convo.SENDER_USER,
         content=user_text,
@@ -339,21 +107,52 @@ async def send_message(conversation_id: str, body: MessageRequest, user: Current
                 params = json.loads(fn.arguments or "{}")
             except json.JSONDecodeError:
                 params = {}
+            audit = tool_call_store.create(
+                message_id=user_message["id"],
+                tool_name=fn.name,
+                params=params,
+                status=(
+                    "pending_approval"
+                    if tool_def.risk_tier == "approval_required"
+                    else "pending"
+                ),
+            )
+            if tool_def.risk_tier == "approval_required":
+                results.append(
+                    {
+                        "tool_call_id": tc.id,
+                        "role": "tool",
+                        "content": json.dumps(
+                            {"ok": True, "pending_approval": True}
+                        ),
+                        "audit_id": audit["id"],
+                        "tool_name": fn.name,
+                        "params": params,
+                        "pending_approval": True,
+                    }
+                )
+                continue
             try:
                 result = await tool_def.handler(params, ctx)
             except Exception as exc:
                 logger.exception("Tool handler %s raised", fn.name)
                 result = {"ok": False, "error": str(exc)}
+            tool_call_store.resolve(
+                tool_call_id=audit["id"],
+                status="committed" if result.get("ok") else "failed",
+                response=result,
+            )
             results.append({
                 "tool_call_id": tc.id,
                 "role": "tool",
                 "content": json.dumps(result),
+                "audit_id": audit["id"],
+                "tool_name": fn.name,
+                "params": params,
             })
         return results
 
     async def event_stream():
-        chunks: list[str] = []
-
         def persist(text: str, status: str) -> None:
             if not text.strip():
                 return
@@ -370,119 +169,129 @@ async def send_message(conversation_id: str, body: MessageRequest, user: Current
 
         yield _sse("meta", {"conversation_id": conv_id, "user_text": user_text})
 
-        # ── record modes: structured parse -> propose card / clarify ─────────
-        if body.mode in ("sale", "kharcha", "udhaar"):
-            try:
-                card, reply = await _parse_record(body.mode, user.shop_id, turns)
-            except (APIError, APITimeoutError) as exc:
-                yield _sse("error", {"detail": f"LLM error: {exc}"})
-                return
-            for word in reply.split(" "):
-                yield _sse("delta", {"text": word + " "})
-            if card:
-                yield _sse("action", card)
-            persist(reply.strip(), convo.STATUS_COMPLETE)
-            yield _sse("done", {"conversation_id": conv_id})
-            return
-
-        # ── tool-capable modes: ask / maal — agentic loop (TOOL-2) ──────────
-        if body.mode in ("ask", "maal"):
-            registry = get_registry()
-            mode_tools = registry.schemas(mode=body.mode)
-
-            if mode_tools:
-                # --- round 1: let model decide whether to call a tool ----------
-                try:
-                    msg = await llm.tool_call_reply(
-                        turns, mode_tools, channel=body.channel, mode=body.mode
-                    )
-                except (APIError, APITimeoutError) as exc:
-                    yield _sse("error", {"detail": f"LLM error: {exc}"})
-                    return
-
-                if msg.tool_calls:
-                    # Emit a brief "thinking" indicator so the UI isn't blank.
-                    yield _sse("delta", {"text": ""})
-
-                    # Run all tool calls in parallel where possible.
-                    tool_results = await _run_tools(msg.tool_calls, tool_ctx)
-
-                    # Emit a tool_result SSE so the frontend can show intermediate cards.
-                    for tr in tool_results:
-                        try:
-                            payload = json.loads(tr["content"])
-                            yield _sse("tool_result", {
-                                "tool_call_id": tr["tool_call_id"],
-                                "result": payload,
-                            })
-                        except Exception:
-                            pass
-
-                    # --- round 2: feed results back, stream the final answer ---
-                    # Build the follow-up message list:
-                    #   prior turns + assistant tool-call message + tool result messages
-                    followup_turns = list(turns) + [
-                        {
-                            "role": "assistant",
-                            "content": msg.content or "",
-                            "tool_calls": [
-                                {
-                                    "id": tc.id,
-                                    "type": "function",
-                                    "function": {
-                                        "name": tc.function.name,
-                                        "arguments": tc.function.arguments,
-                                    },
-                                }
-                                for tc in msg.tool_calls
-                            ],
-                        }
-                    ] + tool_results
-                    try:
-                        async for delta in llm.stream_reply(
-                            followup_turns, channel=body.channel, mode=body.mode
-                        ):
-                            chunks.append(delta)
-                            yield _sse("delta", {"text": delta})
-                    except (APIError, APITimeoutError) as exc:
-                        persist("".join(chunks), convo.STATUS_FAILED)
-                        yield _sse("error", {"detail": f"LLM error: {exc}"})
-                        return
-
-                    persist("".join(chunks), convo.STATUS_COMPLETE)
-                    yield _sse("done", {"conversation_id": conv_id})
-                    return
-
-                # Model chose NOT to call a tool — stream whatever it said.
-                if msg.content:
-                    for word in (msg.content or "").split(" "):
-                        yield _sse("delta", {"text": word + " "})
-                    persist(msg.content, convo.STATUS_COMPLETE)
-                    yield _sse("done", {"conversation_id": conv_id})
-                    return
-
-        # ── fallback: normal streamed reply ──────────────────────────────────
         try:
-            async for delta in llm.stream_reply(turns, channel=body.channel, mode=body.mode):
-                chunks.append(delta)
-                yield _sse("delta", {"text": delta})
-        except asyncio.CancelledError:
-            await asyncio.shield(
-                asyncio.to_thread(persist, "".join(chunks), convo.STATUS_FAILED)
-            )
-            raise
+            in_scope = await llm.is_shop_request(turns)
         except (APIError, APITimeoutError) as exc:
-            persist("".join(chunks), convo.STATUS_FAILED)
             yield _sse("error", {"detail": f"LLM error: {exc}"})
             return
         except Exception as exc:
-            logger.exception("Unexpected error mid-stream")
-            persist("".join(chunks), convo.STATUS_FAILED)
+            logger.exception("Unexpected scope-classification error")
             yield _sse("error", {"detail": f"Internal error: {exc}"})
             return
 
-        persist("".join(chunks), convo.STATUS_COMPLETE)
-        yield _sse("done", {"conversation_id": conv_id})
+        if not in_scope:
+            reply = (
+                "Main sirf aapki dukaan, maal, sale, khata aur kharchay mein "
+                "madad kar sakta hoon."
+            )
+            for word in reply.split(" "):
+                yield _sse("delta", {"text": word + " "})
+            persist(reply, convo.STATUS_COMPLETE)
+            yield _sse("done", {"conversation_id": conv_id})
+            return
+
+        # ── every mode uses one LLM-directed tool loop (TOOL-2) ─────────────
+        # The dashboard mode is only a prompt hint. It never hard-routes the
+        # request or limits the tool schemas the model may select.
+        registry = get_registry()
+        tool_schemas = registry.schemas()
+        orchestration_turns = list(turns)
+        for _round in range(5):
+            try:
+                msg = await llm.tool_call_reply(
+                    orchestration_turns,
+                    tool_schemas,
+                    channel=body.channel,
+                    mode=body.mode,
+                )
+            except (APIError, APITimeoutError) as exc:
+                yield _sse("error", {"detail": f"LLM error: {exc}"})
+                return
+            except Exception as exc:
+                logger.exception("Unexpected orchestration error")
+                yield _sse("error", {"detail": f"Internal error: {exc}"})
+                return
+
+            if not msg.tool_calls:
+                reply = (msg.content or "").strip()
+                for word in reply.split(" ") if reply else []:
+                    yield _sse("delta", {"text": word + " "})
+                persist(reply, convo.STATUS_COMPLETE)
+                yield _sse("done", {"conversation_id": conv_id})
+                return
+
+            yield _sse("delta", {"text": ""})
+            tool_results = await _run_tools(msg.tool_calls, tool_ctx)
+
+            pending_approval = False
+            for tr in tool_results:
+                try:
+                    payload = json.loads(tr["content"])
+                    is_pending = bool(tr.get("pending_approval"))
+                    pending_approval = pending_approval or is_pending
+                    definition = registry.get(tr["tool_name"])
+                    card = (
+                        definition.presenter(
+                            params=tr["params"],
+                            result=payload,
+                            tool_call_id=tr["audit_id"],
+                            status=(
+                                "proposed"
+                                if is_pending
+                                else ("recorded" if payload.get("ok") else "failed")
+                            ),
+                        )
+                        if definition and definition.presenter
+                        else None
+                    )
+                    if card:
+                        yield _sse("action", card)
+                    yield _sse(
+                        "tool_result",
+                        {
+                            "tool_call_id": tr["tool_call_id"],
+                            "result": payload,
+                        },
+                    )
+                except Exception:
+                    logger.exception("Failed to emit tool result")
+
+            if pending_approval:
+                reply = "Details check karke tasdeeq karein."
+                for word in reply.split(" "):
+                    yield _sse("delta", {"text": word + " "})
+                persist(reply, convo.STATUS_COMPLETE)
+                yield _sse("done", {"conversation_id": conv_id})
+                return
+
+            orchestration_turns.append(
+                {
+                    "role": "assistant",
+                    "content": msg.content or "",
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in msg.tool_calls
+                    ],
+                }
+            )
+            orchestration_turns.extend(
+                {
+                    "tool_call_id": tr["tool_call_id"],
+                    "role": "tool",
+                    "content": tr["content"],
+                }
+                for tr in tool_results
+            )
+
+        detail = "Ek message mein bohat zyada actions aaye. Dobara chhota karke boliye."
+        yield _sse("error", {"detail": detail})
 
     return StreamingResponse(
         event_stream(),
@@ -495,243 +304,111 @@ async def send_message(conversation_id: str, body: MessageRequest, user: Current
     )
 
 
-# ── confirm a proposed sale ──────────────────────────────────────────────────
-
-@router.post("/sale/confirm")
-def confirm_sale(body: SaleConfirmRequest, user: CurrentUserDep) -> dict[str, Any]:
-    resolved = _resolve_items(user.shop_id, [i.model_dump() for i in body.items])
-    unresolved = [r["name"] for r in resolved if not r.get("product")]
-    if unresolved:
-        raise HTTPException(422, f"Ye items nahi mile: {', '.join(unresolved)}")
-
-    customer_id = None
-    payment = body.payment
-    if body.khata_number is not None:
-        cust = (
-            get_supabase()
-            .table("customers")
-            .select("id")
-            .eq("shop_id", user.shop_id)
-            .eq("khata_number", body.khata_number)
-            .limit(1)
-            .execute()
-            .data
-        )
-        if not cust:
-            raise HTTPException(422, f"Khata #{body.khata_number} nahi mila")
-        customer_id = cust[0]["id"]
-        payment = "udhaar"
-
-    line_items = [
-        {
-            "product_id": r["product"]["id"],
-            "quantity": r["quantity"],
-            "unit_price": float(r["product"]["sale_price"]),
-        }
-        for r in resolved
-    ]
-
-    try:
-        result = sale.record_sale(
-            shop_id=user.shop_id,
-            items=line_items,
-            total_amount=body.stated_total,
-            payment_type=payment,
-            customer_id=customer_id,
-            created_by=user.user_id,
-        )
-    except sale.SaleError as exc:
-        raise HTTPException(422, str(exc)) from exc
-
-    warn = ""
-    if result["stock_alerts"]:
-        names = ", ".join(a["name"] for a in result["stock_alerts"])
-        warn = f" Stock khatam ho raha hai: {names}."
-    conv = convo.get_or_create_conversation(shop_id=user.shop_id, user_id=user.user_id)
-    convo.add_message(
-        conversation_id=conv["id"],
-        sender=convo.SENDER_ASSISTANT,
-        content=f"Sale record ho gayi — total {_money(result['total_amount'])}.{warn}",
+@router.post("/actions/{tool_call_id}/confirm")
+async def confirm_tool_action(tool_call_id: str, user: CurrentUserDep) -> dict[str, Any]:
+    call = tool_call_store.get_for_shop(
+        tool_call_id=tool_call_id, shop_id=user.shop_id
     )
+    if call is None:
+        raise HTTPException(404, "Ye pending action nahi mila.")
+    if call["status"] != "pending_approval":
+        raise HTTPException(409, "Ye action pending approval mein nahi hai.")
 
-    return {
-        "ok": True,
-        "sale_id": result["sale_id"],
-        "card": _sale_card(
-            "recorded", resolved, result["total_amount"], note=warn.strip() or None
-        ),
-        "stock_alerts": result["stock_alerts"],
-    }
+    tool_def = get_registry().get(call["tool_name"])
+    if tool_def is None:
+        raise HTTPException(422, "Is action ka tool available nahi hai.")
+    if not tool_call_store.claim_approval(tool_call_id=tool_call_id):
+        raise HTTPException(409, "Ye action pehle hi process ho raha hai.")
 
-
-@router.post("/expense/confirm")
-def confirm_expense(body: ExpenseConfirmRequest, user: CurrentUserDep) -> dict[str, Any]:
     try:
-        row = expenses.create_expense(
-            shop_id=user.shop_id,
-            amount=body.amount,
-            note=body.desc,
-            created_by=user.user_id,
+        result = await tool_def.handler(
+            call["params"], {"shop_id": user.shop_id, "user_id": user.user_id}
         )
-    except expenses.ExpenseError as exc:
-        raise HTTPException(422, str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Approved tool handler %s raised", call["tool_name"])
+        result = {"ok": False, "error": str(exc), "reply": str(exc)}
 
-    conv = convo.get_or_create_conversation(shop_id=user.shop_id, user_id=user.user_id)
-    convo.add_message(
-        conversation_id=conv["id"],
-        sender=convo.SENDER_ASSISTANT,
-        content=f"Kharcha likh diya — {_money(float(row['amount']))}.",
+    status = "committed" if result.get("ok") else "failed"
+    tool_call_store.resolve(
+        tool_call_id=tool_call_id, status=status, response=result
     )
-    cat = (row.get("expense_categories") or {}).get("name")
-    return {
-        "ok": True,
-        "expense_id": row["id"],
-        "card": {
-            "kind": "kharcha",
-            "status": "recorded",
-            "title": "Kharcha",
-            "lines": [{"label": body.desc or cat or "Kharcha", "value": ""}],
-            "total": _money(float(row["amount"])),
-            "note": None,
-        },
-    }
-
-
-@router.post("/udhaar/confirm")
-def confirm_udhaar(body: UdhaarConfirmRequest, user: CurrentUserDep) -> dict[str, Any]:
-    customer = None
-    newly_registered = False
-
-    if body.new_customer and body.customer_name and body.cnic:
-        # Register the credit customer, then log against the fresh khata number.
-        try:
-            customer = khata_svc.register_customer(
-                shop_id=user.shop_id,
-                name=body.customer_name.strip(),
-                cnic=body.cnic,
-            )
-            newly_registered = True
-        except khata_svc.DuplicateCustomerError as exc:
-            customer = exc.customer  # already exists — reuse it
-        except khata_svc.KhataError as exc:
-            raise HTTPException(422, str(exc)) from exc
-    elif body.khata_number is not None:
-        customer = khata_svc.find_customer(shop_id=user.shop_id, khata_number=body.khata_number)
-    elif body.customer_name:
-        rows = (
-            get_supabase()
-            .table("customers")
-            .select("id,khata_number,name")
-            .eq("shop_id", user.shop_id)
-            .ilike("name", f"%{body.customer_name.strip()}%")
-            .limit(1)
-            .execute()
-            .data
+    card = (
+        tool_def.presenter(
+            params=call["params"],
+            result=result,
+            tool_call_id=tool_call_id,
+            status="recorded" if result.get("ok") else "failed",
         )
-        customer = rows[0] if rows else None
-
-    if not customer:
-        raise HTTPException(422, "Ye customer / khata nahi mila. Pehle register karein.")
-
-    try:
-        if body.kind == "payment":
-            res = khata_svc.record_payment(
-                shop_id=user.shop_id,
-                customer_id=customer["id"],
-                amount=body.amount,
-                created_by=user.user_id,
-            )
-        else:
-            res = khata_svc.log_udhaar(
-                shop_id=user.shop_id,
-                customer_id=customer["id"],
-                amount=body.amount,
-                created_by=user.user_id,
-            )
-    except khata_svc.KhataError as exc:
-        raise HTTPException(422, str(exc)) from exc
-
-    khata_no = customer.get("khata_number")
-    who = customer.get("name") or f"Khata #{khata_no}"
-    verb = "wapsi" if body.kind == "payment" else "udhaar"
-    reg_note = (
-        f"{who} ka naya khata ban gaya — number {khata_no}. Ye number yaad rakhein."
-        if newly_registered
+        if tool_def.presenter
         else None
     )
-    conv = convo.get_or_create_conversation(shop_id=user.shop_id, user_id=user.user_id)
+    reply = result.get("reply") or (
+        "Action complete ho gaya." if result.get("ok") else "Action complete nahi hua."
+    )
     convo.add_message(
-        conversation_id=conv["id"],
+        conversation_id=call["conversation_id"],
         sender=convo.SENDER_ASSISTANT,
-        content=(
-            (f"{reg_note} " if reg_note else "")
-            + f"{who} ki {verb} {_money(body.amount)} likh di. "
-            + f"Naya balance {_money(res['balance'])}."
-        ),
+        content=reply,
+    )
+    return {"ok": bool(result.get("ok")), "reply": reply, "card": card, "result": result}
+
+
+@router.post("/actions/{tool_call_id}/reject")
+def reject_tool_action(tool_call_id: str, user: CurrentUserDep) -> dict[str, Any]:
+    call = tool_call_store.get_for_shop(
+        tool_call_id=tool_call_id, shop_id=user.shop_id
+    )
+    if call is None:
+        raise HTTPException(404, "Ye pending action nahi mila.")
+    if call["status"] != "pending_approval":
+        raise HTTPException(409, "Ye action pending approval mein nahi hai.")
+
+    tool_call_store.set_status(tool_call_id=tool_call_id, status="rejected")
+    reply = "Theek hai, action cancel kar diya."
+    convo.add_message(
+        conversation_id=call["conversation_id"],
+        sender=convo.SENDER_ASSISTANT,
+        content=reply,
     )
     return {
         "ok": True,
-        "balance": res["balance"],
-        "khata_number": khata_no,
-        "card": {
-            "kind": "udhaar",
-            "status": "recorded",
-            "title": "Udhaar wapsi" if body.kind == "payment" else "Udhaar",
-            "lines": [
-                {"label": who, "value": f"Khata #{khata_no}"},
-                {"label": "Naya balance", "value": _money(res["balance"])},
-            ],
-            "total": _money(body.amount),
-            "note": reg_note,
-        },
+        "tool_call_id": tool_call_id,
+        "status": "rejected",
+        "reply": reply,
     }
 
 
-# ── undo endpoints (TOOL-3 / TOOL-4) ─────────────────────────────────────────
-
-@router.delete("/sale/{sale_id}")
-def undo_sale_endpoint(sale_id: str, user: CurrentUserDep) -> dict[str, Any]:
-    """Reverse a committed sale and restore stock."""
-    removed = sale.reverse_sale(shop_id=user.shop_id, sale_id=sale_id)
-    if not removed:
-        raise HTTPException(404, "Ye sale nahi mili ya pehle se wapas ho chuki hai.")
-    conv = convo.get_or_create_conversation(shop_id=user.shop_id, user_id=user.user_id)
-    convo.add_message(
-        conversation_id=conv["id"],
-        sender=convo.SENDER_ASSISTANT,
-        content="Sale wapas ho gayi. Stock restore kar diya.",
+@router.delete("/actions/{tool_call_id}")
+def undo_tool_action(tool_call_id: str, user: CurrentUserDep) -> dict[str, Any]:
+    call = tool_call_store.get_for_shop(
+        tool_call_id=tool_call_id, shop_id=user.shop_id
     )
-    return {"ok": True, "sale_id": sale_id}
+    if call is None:
+        raise HTTPException(404, "Ye action nahi mila.")
+    if call["status"] != "committed":
+        raise HTTPException(409, "Sirf committed action undo ho sakta hai.")
 
+    tool_def = get_registry().get(call["tool_name"])
+    if tool_def is None or tool_def.undo is None:
+        raise HTTPException(422, "Is action ke liye undo available nahi hai.")
 
-@router.delete("/expense/{expense_id}")
-def delete_expense_endpoint(expense_id: str, user: CurrentUserDep) -> dict[str, Any]:
-    """Delete a committed expense."""
-    removed = expenses.delete_expense(shop_id=user.shop_id, expense_id=expense_id)
-    if not removed:
-        raise HTTPException(404, "Ye kharcha nahi mila ya pehle se hata diya gaya tha.")
-    conv = convo.get_or_create_conversation(shop_id=user.shop_id, user_id=user.user_id)
-    convo.add_message(
-        conversation_id=conv["id"],
-        sender=convo.SENDER_ASSISTANT,
-        content="Kharcha wapas ho gaya.",
+    result = call.get("response") or {}
+    undone = tool_def.undo(
+        result=result,
+        ctx={"shop_id": user.shop_id, "user_id": user.user_id},
     )
-    return {"ok": True, "expense_id": expense_id}
 
+    if not undone:
+        raise HTTPException(409, "Action undo nahi hua ya pehle hi undo ho chuka hai.")
 
-@router.delete("/udhaar/{entry_id}")
-def undo_udhaar_endpoint(entry_id: str, user: CurrentUserDep) -> dict[str, Any]:
-    """Reverse a ledger entry (udhaar or payment)."""
-    removed = khata_svc.reverse_ledger_entry(shop_id=user.shop_id, entry_id=entry_id)
-    if not removed:
-        raise HTTPException(404, "Ye entry nahi mili ya pehle se hata di gayi thi.")
-    conv = convo.get_or_create_conversation(shop_id=user.shop_id, user_id=user.user_id)
+    tool_call_store.set_status(tool_call_id=tool_call_id, status="undone")
+    reply = "Action wapas ho gaya."
     convo.add_message(
-        conversation_id=conv["id"],
+        conversation_id=call["conversation_id"],
         sender=convo.SENDER_ASSISTANT,
-        content="Udhaar entry wapas ho gayi.",
+        content=reply,
     )
-    return {"ok": True, "entry_id": entry_id}
+    return {"ok": True, "tool_call_id": tool_call_id, "reply": reply}
 
 
 # ── history ──────────────────────────────────────────────────────────────────
@@ -743,10 +420,31 @@ def get_history(
 ):
     conversation = convo.find_conversation(shop_id=user.shop_id)
     if conversation is None:
-        return {"conversation_id": None, "messages": []}
+        return {"conversation_id": None, "messages": [], "action": None}
+
+    action = None
+    registry = get_registry()
+    for call in tool_call_store.recent_for_conversation(
+        conversation_id=conversation["id"]
+    ):
+        tool_def = registry.get(call["tool_name"])
+        if tool_def and tool_def.presenter:
+            action = tool_def.presenter(
+                params=call.get("params") or {},
+                result=call.get("response") or {},
+                tool_call_id=call["id"],
+                status=(
+                    "proposed"
+                    if call["status"] == "pending_approval"
+                    else "recorded"
+                ),
+            )
+            if action:
+                break
     return {
         "conversation_id": conversation["id"],
         "messages": convo.list_messages(
             shop_id=user.shop_id, conversation_id=conversation["id"], limit=limit
         ),
+        "action": action,
     }

@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.services import khata as khata_svc
+from app.tools.cards import card_base, money
 from app.tools.registry import ToolDefinition, get_registry
 
 _PARAMETERS: dict[str, Any] = {
@@ -93,6 +94,42 @@ async def _handler(params: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any
     }
 
 
+def _present(
+    *, params: dict[str, Any], result: dict[str, Any], tool_call_id: str, status: str
+) -> dict[str, Any]:
+    who = (
+        f"Khata #{params['khata_number']}"
+        if params.get("khata_number")
+        else params.get("customer_name") or "Customer"
+    )
+    card = {
+        **card_base(
+            tool_name="record_payment",
+            tool_call_id=tool_call_id,
+            status=status,
+            result=result,
+            undoable=status == "recorded",
+        ),
+        "kind": "udhaar",
+        "title": "Udhaar wapsi",
+        "lines": [{"label": who, "value": ""}],
+        "total": money(float(params.get("amount") or 0)),
+    }
+    if status == "proposed":
+        card["note"] = "Wapsi confirm karne se pehle check kar lein."
+    return card
+
+
+def _undo(*, result: dict[str, Any], ctx: dict[str, Any]) -> bool:
+    entry_id = result.get("entry_id")
+    return bool(
+        entry_id
+        and khata_svc.reverse_ledger_entry(
+            shop_id=ctx["shop_id"], entry_id=entry_id
+        )
+    )
+
+
 get_registry().register(ToolDefinition(
     name="record_payment",
     description=(
@@ -102,6 +139,7 @@ get_registry().register(ToolDefinition(
     ),
     parameters=_PARAMETERS,
     risk_tier="approval_required",
-    modes=["udhaar"],
     handler=_handler,
+    presenter=_present,
+    undo=_undo,
 ))

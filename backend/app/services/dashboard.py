@@ -34,23 +34,24 @@ def today_snapshot(*, shop_id: str) -> dict[str, Any]:
         2,
     )
 
-    # Profit = Σ (sale_price - cost_price) × quantity for today's sold_items.
-    # This is COGS-based, not a flat margin (RPT-2).
-    profit = 0.0
+    # Profit = actual recorded sales total - cost of goods sold (RPT-2).
+    total_cost = 0.0
     if sale_ids:
         sold_items = (
             sb.table("sold_items")
-            .select("quantity,unit_price,products(cost_price)")
+            .select("quantity,unit_cost,products(cost_price)")
             .in_("sale_id", sale_ids)
             .execute()
             .data
         )
         for item in sold_items:
-            cost = float((item.get("products") or {}).get("cost_price") or 0)
-            price = float(item.get("unit_price") or 0)
+            cost = item.get("unit_cost")
+            # shortcut: legacy rows use current product cost until they are backfilled.
+            if cost is None:
+                cost = (item.get("products") or {}).get("cost_price")
             qty = int(item.get("quantity") or 0)
-            profit += (price - cost) * qty
-    profit = round(profit, 2)
+            total_cost += float(cost or 0) * qty
+    profit = round(total_sale - total_cost, 2)
 
     # ── today's expenses ─────────────────────────────────────────────────────
     expenses = (

@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.services import catalog
+from app.tools.cards import card_base, money
 from app.tools.registry import ToolDefinition, get_registry
 
 _PARAMETERS: dict[str, Any] = {
@@ -70,6 +71,12 @@ async def _handler(params: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any
     if not updates:
         return {"ok": False, "reply": "Kya change karna hai? Stock, sale price, ya cost price?"}
 
+    before = {
+        "stock": product["stock"],
+        "sale_price": float(product["sale_price"]),
+        "cost_price": float(product["cost_price"]),
+    }
+
     updated = catalog.update_product(shop_id=shop_id, product_id=product["id"], **updates)
     if not updated:
         return {"ok": False, "reply": "Update nahi ho saka. Dobara koshish karein."}
@@ -87,8 +94,50 @@ async def _handler(params: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any
         "product_id": product["id"],
         "product_name": product["name"],
         "changes": updates,
+        "before": before,
         "reply": f"{product['name']} ka {', '.join(changes)} update ho gaya.",
     }
+
+
+def _present(
+    *, params: dict[str, Any], result: dict[str, Any], tool_call_id: str, status: str
+) -> dict[str, Any]:
+    labels = {
+        "stock": "Stock",
+        "sale_price": "Sale price",
+        "cost_price": "Cost price",
+    }
+    return {
+        **card_base(
+            tool_name="adjust_product",
+            tool_call_id=tool_call_id,
+            status=status,
+            result=result,
+            undoable=status == "recorded",
+        ),
+        "kind": "maal",
+        "title": "Maal Update",
+        "lines": [
+            {
+                "label": f"{params.get('product_name', 'Product')} — {labels[key]}",
+                "value": money(float(value)) if "price" in key else str(value),
+            }
+            for key, value in params.items()
+            if key in labels and value is not None
+        ],
+    }
+
+
+def _undo(*, result: dict[str, Any], ctx: dict[str, Any]) -> bool:
+    product_id = result.get("product_id")
+    before = result.get("before")
+    return bool(
+        product_id
+        and before
+        and catalog.update_product(
+            shop_id=ctx["shop_id"], product_id=product_id, **before
+        )
+    )
 
 
 get_registry().register(ToolDefinition(
@@ -100,6 +149,7 @@ get_registry().register(ToolDefinition(
     ),
     parameters=_PARAMETERS,
     risk_tier="commit_undo",
-    modes=["maal"],
     handler=_handler,
+    presenter=_present,
+    undo=_undo,
 ))

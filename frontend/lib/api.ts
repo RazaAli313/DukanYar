@@ -8,6 +8,7 @@
  */
 
 import { createClient } from "@/utils/supabase/client";
+import type { ActionCard } from "@/lib/chatApi";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -81,18 +82,11 @@ export interface Product {
   stock: number;
 }
 
-export interface SaleConfirmResult {
+export interface ToolActionResult {
   ok: boolean;
-  sale_id: string;
-  card: {
-    kind: string;
-    status: string;
-    title: string;
-    lines: { label: string; value: string; flag?: boolean }[];
-    total?: string;
-    note?: string | null;
-  };
-  stock_alerts: { product_id: string; name: string; stock: number }[];
+  reply: string;
+  card: ActionCard | null;
+  result?: Record<string, unknown>;
 }
 
 // ── endpoints ────────────────────────────────────────────────────────────────
@@ -121,28 +115,15 @@ export const api = {
   ledger: (filter: "all" | "sale" | "udhaar" | "kharcha" = "all") =>
     get<{ transactions: LedgerTxn[] }>(`/khata/ledger?filter=${filter}`),
   customers: () => get<{ customers: Customer[] }>("/khata/customers"),
-  confirmSale: (body: {
-    items: { name: string; quantity: number }[];
-    stated_total: number;
-    payment?: "cash" | "udhaar";
-    khata_number?: number | null;
-  }) => post<SaleConfirmResult>("/conversations/sale/confirm", body),
-  confirmExpense: (body: { amount: number; desc?: string | null }) =>
-    post<SaleConfirmResult>("/conversations/expense/confirm", body),
-  confirmUdhaar: (body: {
-    amount: number;
-    kind: "udhaar" | "payment";
-    khata_number?: number | null;
-    customer_name?: string | null;
-    cnic?: string | null;
-    new_customer?: boolean;
-  }) => post<SaleConfirmResult>("/conversations/udhaar/confirm", body),
-
-  // ── undo endpoints (TOOL-3 / TOOL-4) ──────────────────────────────────────
-  undoSale: (saleId: string) =>
-    del<{ ok: boolean; sale_id: string }>(`/conversations/sale/${saleId}`),
-  deleteExpense: (expenseId: string) =>
-    del<{ ok: boolean; expense_id: string }>(`/conversations/expense/${expenseId}`),
-  undoUdhaar: (entryId: string) =>
-    del<{ ok: boolean; entry_id: string }>(`/conversations/udhaar/${entryId}`),
+  confirmToolCall: (toolCallId: string) =>
+    post<ToolActionResult>(`/conversations/actions/${toolCallId}/confirm`, {}),
+  rejectToolCall: (toolCallId: string) =>
+    post<{ ok: boolean; status: "rejected"; reply: string }>(
+      `/conversations/actions/${toolCallId}/reject`,
+      {},
+    ),
+  undoToolCall: (toolCallId: string) =>
+    del<{ ok: boolean; tool_call_id: string; reply: string }>(
+      `/conversations/actions/${toolCallId}`,
+    ),
 };

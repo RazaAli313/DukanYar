@@ -20,8 +20,11 @@ export type Mode = "sale" | "udhaar" | "kharcha" | "ask" | "maal";
 
 /** Structured result of a tool the assistant ran (TOOL-4 / SALE-3). */
 export interface ActionCard {
-  kind: "sale" | "udhaar" | "kharcha";
+  kind: "sale" | "udhaar" | "kharcha" | "maal" | "generic";
   status: "proposed" | "recorded" | "failed";
+  tool_name: string;
+  tool_call_id: string;
+  undoable: boolean;
   title: string;
   lines: { label: string; value: string; muted?: boolean; flag?: boolean }[];
   total?: string;
@@ -146,7 +149,7 @@ interface HistoryRow {
 
 export async function loadHistory(
   limit = 30,
-): Promise<{ conversationId: string | null; messages: Message[] }> {
+): Promise<{ conversationId: string | null; messages: Message[]; action: ActionCard | null }> {
   const res = await fetch(`${API_BASE}/conversations/history?limit=${limit}`, {
     headers: await authHeader(),
   });
@@ -156,9 +159,11 @@ export async function loadHistory(
   const body = (await res.json()) as {
     conversation_id: string | null;
     messages: HistoryRow[];
+    action: ActionCard | null;
   };
   return {
     conversationId: body.conversation_id,
+    action: body.action,
     messages: body.messages.map((r) => ({
       id: r.id,
       sender: r.role,

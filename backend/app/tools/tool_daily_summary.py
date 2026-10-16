@@ -50,7 +50,6 @@ get_registry().register(ToolDefinition(
         "'profit kitna hua', etc."
     ),
     parameters=_PARAMETERS,
-    risk_tier="commit_undo",  # read-only; no undo needed — tier is just for classification
-    modes=["ask"],
+    risk_tier="read_only",
     handler=_handler,
 ))

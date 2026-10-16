@@ -6,6 +6,7 @@ importing every sibling module (files named ``tool_*.py`` under this
 package), so the orchestration loop never needs to name individual tools.
 
 Risk tiers (TOOL-3):
+  - "read_only"         — reads shop data without mutating it.
   - "commit_undo"       — writes immediately; a quick undo is shown.
   - "approval_required" — shows the parsed action and waits for explicit
                           shopkeeper approval before any write.
@@ -19,12 +20,15 @@ from __future__ import annotations
 import importlib
 import logging
 import pkgutil
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Coroutine, Literal
 
 logger = logging.getLogger(__name__)
 
-RiskTier = Literal["commit_undo", "approval_required"]
+RiskTier = Literal["read_only", "commit_undo", "approval_required"]
+ToolHandler = Callable[..., Coroutine[Any, Any, dict[str, Any]]]
+ToolPresenter = Callable[..., dict[str, Any] | None]
+ToolUndo = Callable[..., bool]
 
 
 @dataclass
@@ -37,10 +41,11 @@ class ToolDefinition:
     parameters: dict[str, Any]
     risk_tier: RiskTier
     # Async callable: (parsed_params, execution_context) -> result_dict
-    handler: Callable[..., Coroutine[Any, Any, dict[str, Any]]]
-    # Tool files can declare which conversation modes they apply to.
-    # Empty means "available in all modes".
-    modes: list[str] = field(default_factory=list)
+    handler: ToolHandler
+    # Optional UI and reversal behavior live beside the tool, so adding a tool
+    # never requires a central router switch statement.
+    presenter: ToolPresenter | None = None
+    undo: ToolUndo | None = None
 
 
 class ToolRegistryError(Exception):
@@ -60,20 +65,28 @@ class ToolRegistry:
                 f"Duplicate tool name '{definition.name}'. Each tool must have "
                 "a unique name. Check your tool modules for conflicts."
             )
+        if definition.risk_tier == "commit_undo" and (
+            definition.presenter is None or definition.undo is None
+        ):
+            raise ToolRegistryError(
+                f"Commit-with-undo tool '{definition.name}' must declare both "
+                "presenter and undo behavior."
+            )
+        if definition.risk_tier == "approval_required" and definition.presenter is None:
+            raise ToolRegistryError(
+                f"Approval-required tool '{definition.name}' must declare a presenter."
+            )
         self._tools[definition.name] = definition
         logger.info("Tool registered: %s (tier=%s)", definition.name, definition.risk_tier)
 
     def get(self, name: str) -> ToolDefinition | None:
         return self._tools.get(name)
 
-    def all(self, *, mode: str | None = None) -> list[ToolDefinition]:
-        """Return all tools, optionally filtered to those available in *mode*."""
-        tools = list(self._tools.values())
-        if mode is None:
-            return tools
-        return [t for t in tools if not t.modes or mode in t.modes]
+    def all(self) -> list[ToolDefinition]:
+        """Return every tool; UI modes never restrict model choice."""
+        return list(self._tools.values())
 
-    def schemas(self, *, mode: str | None = None) -> list[dict[str, Any]]:
+    def schemas(self) -> list[dict[str, Any]]:
         """OpenAI-style tool schemas for use in a model call."""
         return [
             {
@@ -84,7 +97,7 @@ class ToolRegistry:
                     "parameters": t.parameters,
                 },
             }
-            for t in self.all(mode=mode)
+            for t in self.all()
         ]
 
     def names(self) -> list[str]:

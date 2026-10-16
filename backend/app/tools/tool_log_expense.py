@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.services import expenses as exp_svc
+from app.tools.cards import card_base, money
 from app.tools.registry import ToolDefinition, get_registry
 
 _PARAMETERS: dict[str, Any] = {
@@ -58,6 +59,37 @@ async def _handler(params: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any
     }
 
 
+def _present(
+    *, params: dict[str, Any], result: dict[str, Any], tool_call_id: str, status: str
+) -> dict[str, Any]:
+    return {
+        **card_base(
+            tool_name="log_expense",
+            tool_call_id=tool_call_id,
+            status=status,
+            result=result,
+            undoable=status == "recorded",
+        ),
+        "kind": "kharcha",
+        "title": "Kharcha",
+        "lines": [
+            {
+                "label": params.get("note") or result.get("category") or "Kharcha",
+                "value": "",
+            }
+        ],
+        "total": money(float(params.get("amount") or result.get("amount") or 0)),
+    }
+
+
+def _undo(*, result: dict[str, Any], ctx: dict[str, Any]) -> bool:
+    expense_id = result.get("expense_id")
+    return bool(
+        expense_id
+        and exp_svc.delete_expense(shop_id=ctx["shop_id"], expense_id=expense_id)
+    )
+
+
 get_registry().register(ToolDefinition(
     name="log_expense",
     description=(
@@ -66,6 +98,7 @@ get_registry().register(ToolDefinition(
     ),
     parameters=_PARAMETERS,
     risk_tier="commit_undo",
-    modes=["kharcha"],
     handler=_handler,
+    presenter=_present,
+    undo=_undo,
 ))

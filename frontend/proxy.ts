@@ -7,7 +7,7 @@ function isShopPath(path: string) {
   return SHOP_PREFIXES.some((p) => path === p || path.startsWith(p + '/'))
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const response = NextResponse.next({ request: { headers: request.headers } })
 
   const supabase = createServerClient(

@@ -2,6 +2,7 @@
 
 import { createClient } from '../../utils/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { headers } from 'next/headers'
 
 export interface AdminStats {
   totalShops: number
@@ -24,6 +25,17 @@ export interface AdminShop {
   owner_email?: string
   user_count: number
   conversation_count: number
+}
+
+interface AdminShopQueryRow {
+  id: string
+  name: string
+  address: string | null
+  location: string | null
+  is_active: boolean | null
+  created_at: string
+  profiles: { email: string | null; role_name: string | null }[] | null
+  conversations: { id: string }[] | null
 }
 
 export interface VoiceInteraction {
@@ -147,9 +159,10 @@ export async function getAdminShops(): Promise<AdminShop[]> {
     return []
   }
 
-  return (shops || []).map((shop: any) => {
+  const typedShops = (shops || []) as unknown as AdminShopQueryRow[]
+  return typedShops.map((shop) => {
     const profiles = Array.isArray(shop.profiles) ? shop.profiles : []
-    const owner = profiles.find((p: any) => p.role_name === 'shopkeeper') || profiles[0]
+    const owner = profiles.find((p) => p.role_name === 'shopkeeper') || profiles[0]
     const conversations = Array.isArray(shop.conversations) ? shop.conversations : []
 
     return {
@@ -253,7 +266,17 @@ export async function getSystemHealth(): Promise<SystemHealthStatus> {
   let backendStatus: 'healthy' | 'degraded' | 'down' = 'healthy'
   let backendLatency = 0
   const backendStart = Date.now()
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+  const configuredApiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+  let apiUrl = configuredApiUrl
+
+  // Browser code can fetch a relative `/api` URL, but this server action needs
+  // an absolute URL. Resolve it against the active preview/production host.
+  if (configuredApiUrl.startsWith('/')) {
+    const requestHeaders = await headers()
+    const host = requestHeaders.get('x-forwarded-host') || requestHeaders.get('host')
+    const protocol = requestHeaders.get('x-forwarded-proto') || 'https'
+    if (host) apiUrl = `${protocol}://${host}${configuredApiUrl}`
+  }
 
   try {
     const res = await fetch(`${apiUrl}/health`, { cache: 'no-store', signal: AbortSignal.timeout(3000) })

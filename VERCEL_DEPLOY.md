@@ -1,89 +1,148 @@
-# Vercel Deployment Guide
+# DukanYar Vercel deployment
 
-## Architecture
+DukanYar deploys as one Vercel project with two Services:
 
-On Vercel, both the frontend and backend are deployed together from the mono-repo root:
+```text
+https://your-project.vercel.app
+├── /*       Next.js frontend
+└── /api/*  FastAPI backend
 
-| Layer | Vercel build | URL pattern |
-|---|---|---|
-| Next.js frontend | `@vercel/next` from `frontend/` | `/*` |
-| FastAPI backend | `@vercel/python` from `api/index.py` | `/api/*` |
-
-`vercel.json` rewrites every `/api/:path*` request to the Python serverless function (`api/index.py`). Mangum translates the Lambda-style invocation to ASGI so FastAPI routes work normally.
-
-## Step 1 — Import the repo on Vercel
-
-1. Go to vercel.com → New Project → Import Git Repository
-2. Select this repo
-3. **Root Directory**: leave blank (use repo root)
-4. Vercel will auto-detect the `vercel.json` and build both projects
-
-## Step 2 — Environment Variables
-
-Set these in **Vercel Project Settings → Environment Variables**.
-
-### Required (all environments)
-
+Supabase
+├── PostgreSQL
+└── Authentication
 ```
-# Supabase
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_KEY=<service_role_key>
 
-# LLM (OpenAI-compatible — Gemini, Groq, Qwen, etc.)
-LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
-LLM_API_KEY=<your_key>
-LLM_MODEL=gemini-2.0-flash
+The root `vercel.json` is the source of truth. It builds `frontend/` as a
+Next.js service, builds `backend/` as a FastAPI service, and routes `/api/*` to
+the backend. The browser therefore uses the same origin and does not need a
+separate backend hostname.
 
-# CORS — allow your Vercel domain (add preview URLs as needed)
-CORS_ORIGINS=https://dukanyar.vercel.app
+Vercel Services and the Python runtime are currently Beta. They support this
+polyglot monorepo, ASGI, and streaming responses, but production deployments
+should still be smoke-tested after each release.
 
-# Frontend Supabase (prefix NEXT_PUBLIC_ so the browser gets them)
+## 1. Prepare Supabase
+
+1. Create or select the production Supabase project.
+2. Apply every migration under `supabase/migrations/` in filename order.
+3. In Supabase Authentication → URL Configuration, set the Vercel production
+   URL as the Site URL and add the required preview/production redirect URLs.
+4. Keep CI on a separate test Supabase project. Never provide production
+   credentials through `TEST_SUPABASE_URL` or `TEST_SUPABASE_KEY`.
+
+## 2. Create the Vercel project
+
+1. Import this Git repository into Vercel.
+2. Leave **Root Directory** at the repository root.
+3. Select the **Services** framework preset if Vercel does not infer it from
+   `vercel.json`.
+4. Keep Fluid Compute enabled for the Python service.
+
+The local Vercel CLI must be version 48.1.8 or newer for current FastAPI
+support. To run both services locally without cloud authentication:
+
+```bash
+vercel dev -L
+```
+
+## 3. Configure environment variables
+
+Add these in Vercel Project Settings → Environment Variables. Apply secrets to
+Production and use separate non-production values for Preview/Development.
+
+### Required browser configuration
+
+```text
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon_key>
-
-# Frontend API base — /api routes to the Python function via vercel.json rewrite
-NEXT_PUBLIC_API_URL=/api
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<Supabase anon key>
 ```
 
-### STT (Voice input)
+`NEXT_PUBLIC_API_URL=/api` is already committed in
+`frontend/.env.production`; override it only if the deployment is intentionally
+split across domains.
 
-```
-STT_PROVIDER=groq          # or speechmatics
-GROQ_STT_API_KEY=<key>     # if STT_PROVIDER=groq
-SPEECHMATICS_API_KEY=<key> # if STT_PROVIDER=speechmatics
+Values prefixed with `NEXT_PUBLIC_` are included in the browser bundle. The
+Supabase anon key is designed for client use; never place the service-role key
+in one of these variables.
+
+### Required server secrets
+
+```text
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_KEY=<Supabase service-role key>
+SUPABASE_SERVICE_ROLE_KEY=<same service-role key, used by admin server actions>
+
+LLM_BASE_URL=<OpenAI-compatible base URL>
+LLM_API_KEY=<provider API key>
+LLM_MODEL=<model with tool-calling support>
 ```
 
-### TTS (Voice output)
+`SUPABASE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and `LLM_API_KEY` must be Vercel
+Secret variables. Do not commit them or prefix them with `NEXT_PUBLIC_`.
 
-```
-# Option A: edge-tts (free, no key, default)
+### Runtime configuration
+
+```text
+CORS_ORIGINS=https://your-project.vercel.app
+
+LLM_REASONING_EFFORT=none
+LLM_MAX_CONTEXT_TURNS=8
+
+STT_PROVIDER=groq
+GROQ_STT_API_KEY=<Groq API key>
+# SPEECHMATICS_API_KEY=<key>  # when STT_PROVIDER=speechmatics
+
 TTS_PROVIDER=edge
 TTS_VOICE=ur-PK-AsadNeural
-
-# Option B: Azure (more reliable on serverless)
-# TTS_PROVIDER=azure
-# AZURE_SPEECH_KEY=<key>
-# AZURE_SPEECH_REGION=eastus
-# TTS_VOICE=ur-PK-AsadNeural
-```
-
-### Optional tuning
-
-```
-LLM_REASONING_EFFORT=none   # none=Groq/Qwen, minimal=Gemini
-LLM_MAX_CONTEXT_TURNS=8
 TTS_RATE=+0%
 TTS_TRANSLITERATE=false
 ```
 
-## Step 3 — Supabase Auth Redirect URL
+For preview deployments, same-origin `/api` calls do not require preview URLs
+to be added to CORS. Supabase Auth redirect URLs still need to cover whichever
+preview authentication flow you intend to test.
 
-In Supabase Dashboard → Authentication → URL Configuration:
-- Add `https://dukanyar.vercel.app/**` to Redirect URLs
-- Add `https://dukanyar.vercel.app` to Site URL
+## 4. Deploy
 
-## Notes
+Git integration creates preview deployments for branches and deploys the
+configured production branch. For a manual preview deployment, use a current
+Vercel CLI from the repository root:
 
-- Cold starts: the Python function is ~20–30 MB (supabase + openai + mangum). First request after idle may take 3–5 s.
-- Streaming (SSE): Mangum + Vercel support streaming responses. The chat endpoint streams token deltas in real time.
-- The `/api/health` Next.js route handler is shadowed by the Python function rewrite — this is fine; FastAPI also serves `GET /api/health`.
+```bash
+vercel deploy
+```
+
+Do not promote a deployment until the migration set and environment variables
+match that deployment environment.
+
+## 5. Release verification
+
+Verify the public boundaries on the deployed domain:
+
+```text
+GET  /api/health                              -> 200 {"status":"ok"}
+GET  /login                                   -> login page
+POST /api/conversations/{id}/messages         -> SSE meta/delta/action/done
+POST /api/conversations/actions/{id}/confirm  -> executes a pending action once
+POST /api/conversations/actions/{id}/reject   -> rejects without writing
+DELETE /api/conversations/actions/{id}        -> undoes an undoable action
+```
+
+In a test shop, run one action from each risk tier:
+
+- read-only: daily summary or low stock;
+- commit-with-undo: expense, sale, udhaar, or inventory adjustment;
+- approval-required: repayment or add product, testing both reject and confirm.
+
+Confirm that refreshing restores the latest action card, repeated confirmation
+returns HTTP 409, undo restores the previous state, and stock/khata balances
+remain correct.
+
+## Platform constraints
+
+- Function request and response bodies are limited to 4.5 MB. Keep voice clips
+  short; larger media should upload directly to object storage.
+- Functions are request-driven, not permanent processes. Do not add an
+  always-running worker to the FastAPI process.
+- LLM orchestration is bounded to five tool rounds in application code so a
+  request cannot loop indefinitely.

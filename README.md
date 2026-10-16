@@ -12,6 +12,13 @@ docs/       epic tickets, user stories, ERD
 mockups/    static HTML mockup
 ```
 
+## Deploy
+
+The frontend and FastAPI backend deploy together as one Vercel Services
+project; Supabase provides authentication and PostgreSQL. See
+[`VERCEL_DEPLOY.md`](VERCEL_DEPLOY.md) for the environment variables, migration
+step, and release checks.
+
 ## Run locally
 
 ### Backend

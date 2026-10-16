@@ -22,7 +22,6 @@ export function KhataView() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setRows(null);
     api
       .ledger(tab)
       .then((r) => setRows(r.transactions))
@@ -42,7 +41,11 @@ export function KhataView() {
         {tabs.map((t) => (
           <button
             key={t.key}
-            onClick={() => setTab(t.key)}
+            onClick={() => {
+              setRows(null);
+              setError(null);
+              setTab(t.key);
+            }}
             className={cn(
               "flex-1 rounded-md py-1.5 text-sm font-medium transition-colors",
               tab === t.key

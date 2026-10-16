@@ -11,7 +11,7 @@ import {
 } from "@/lib/chatApi";
 import { api } from "@/lib/api";
 import { isRtl } from "@/lib/rtl";
-import { usePushToTalk } from "@/lib/voice/usePushToTalk";
+import { usePushToTalk, type CapturedAudio } from "@/lib/voice/usePushToTalk";
 import { transcribeAudio, STT_MIN_CONFIDENCE } from "@/lib/voice/stt";
 import { useReplySpeech } from "@/lib/voice/useReplySpeech";
 import { MODES } from "./modes";
@@ -43,18 +43,11 @@ export function ConversationScreen({ mode }: { mode: Mode }) {
   const [loaded, setLoaded] = useState(false);
   const [undoBusy, setUndoBusy] = useState(false);
 
-  // Holds the IDs returned after a confirmed action so undo knows what to reverse.
-  const recordedRef = useRef<{
-    sale_id?: string;
-    expense_id?: string;
-    entry_id?: string;
-  } | null>(null);
-
   // The thread is one per shop and persists — reload it so a refresh doesn't
   // wipe the conversation.
   useEffect(() => {
     loadHistory(25)
-      .then(({ messages: hist }) => {
+      .then(({ messages: hist, action }) => {
         setMessages(
           hist.map((h) => ({
             id: h.id,
@@ -64,13 +57,13 @@ export function ConversationScreen({ mode }: { mode: Mode }) {
             channel: h.channel,
           })),
         );
+        setCard(action);
+        setLocked(action?.status === "proposed");
       })
       .catch(() => {})
       .finally(() => setLoaded(true));
   }, []);
 
-  // The raw proposed card (carries the private _fields the confirm call needs).
-  const proposalRef = useRef<Record<string, unknown> | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -111,7 +104,7 @@ export function ConversationScreen({ mode }: { mode: Mode }) {
             },
             onAction: (c) => {
               setCard(c);
-              proposalRef.current = c as unknown as Record<string, unknown>;
+              setLocked(c.status === "proposed");
             },
             onComplete: () => {
               setMessages((m) =>
@@ -149,7 +142,7 @@ export function ConversationScreen({ mode }: { mode: Mode }) {
   });
 
   const handleClip = useCallback(
-    async (clip: Awaited<ReturnType<typeof ptt.stop>>) => {
+    async (clip: CapturedAudio | null) => {
       if (!clip) return;
       setBusy(true);
       try {
@@ -174,47 +167,15 @@ export function ConversationScreen({ mode }: { mode: Mode }) {
     void handleClip(clip);
   }, [ptt, handleClip]);
 
-  // ── confirm the proposed action (sale / kharcha / udhaar) ──────────────────
+  // ── generic approval / rejection / undo (TOOL-3) ──────────────────────────
   const confirmAction = useCallback(async () => {
-    const p = proposalRef.current as Record<string, unknown> | null;
-    if (!p) return;
+    if (!card || card.status !== "proposed") return;
     setBusy(true);
     try {
-      let res;
-      if (p.kind === "sale") {
-        res = await api.confirmSale({
-          items: (p._items as { name: string; quantity: number }[]) ?? [],
-          stated_total: (p._stated_total as number) ?? 0,
-          payment: (p.payment as "cash" | "udhaar") ?? "cash",
-          khata_number: (p.khata_number as number | null) ?? null,
-        });
-      } else if (p.kind === "kharcha") {
-        res = await api.confirmExpense({
-          amount: (p._amount as number) ?? 0,
-          desc: (p._desc as string) ?? null,
-        });
-      } else {
-        res = await api.confirmUdhaar({
-          amount: (p._amount as number) ?? 0,
-          kind: (p._kind as "udhaar" | "payment") ?? "udhaar",
-          khata_number: (p._khata_number as number | null) ?? null,
-          customer_name: (p._customer_name as string | null) ?? null,
-          cnic: (p._cnic as string | null) ?? null,
-          new_customer: (p._new as boolean) ?? false,
-        });
-      }
-      // Persist undo IDs for the undo button.
-      const resAny = res as unknown as Record<string, unknown>;
-      recordedRef.current = {
-        sale_id: resAny.sale_id as string | undefined,
-        expense_id: resAny.expense_id as string | undefined,
-        entry_id: resAny.entry_id as string | undefined,
-      };
-      setCard(res.card as ActionCard);
-      setLocked(true);
-      const line = `${res.card.title} record ho gaya${
-        res.card.note ? `. ${res.card.note}` : `, ${res.card.total}.`
-      }`;
+      const res = await api.confirmToolCall(card.tool_call_id);
+      if (res.card) setCard(res.card);
+      setLocked(false);
+      const line = res.reply;
       setMessages((m) => [
         ...m,
         { id: uid(), role: "assistant", text: line, status: "complete" },
@@ -225,34 +186,43 @@ export function ConversationScreen({ mode }: { mode: Mode }) {
     } finally {
       setBusy(false);
     }
-  }, [speech]);
+  }, [card, speech]);
 
-  // ── undo a recorded action (TOOL-3) ───────────────────────────────────────
-  const undoAction = useCallback(async () => {
-    const ids = recordedRef.current;
-    if (!ids) return;
-    setUndoBusy(true);
+  const rejectAction = useCallback(async () => {
+    if (!card || card.status !== "proposed") return;
+    setBusy(true);
     try {
-      if (ids.sale_id) {
-        await api.undoSale(ids.sale_id);
-      } else if (ids.expense_id) {
-        await api.deleteExpense(ids.expense_id);
-      } else if (ids.entry_id) {
-        await api.undoUdhaar(ids.entry_id);
-      }
-      recordedRef.current = null;
+      const res = await api.rejectToolCall(card.tool_call_id);
       setCard(null);
       setLocked(false);
       setMessages((m) => [
         ...m,
-        { id: uid(), role: "assistant", text: "Undo ho gaya. Dobara likhna ho to boliye.", status: "complete" },
+        { id: uid(), role: "assistant", text: res.reply, status: "complete" },
+      ]);
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : "Cancel nahi hua.");
+    } finally {
+      setBusy(false);
+    }
+  }, [card]);
+
+  const undoAction = useCallback(async () => {
+    if (!card || card.status !== "recorded" || !card.undoable) return;
+    setUndoBusy(true);
+    try {
+      const res = await api.undoToolCall(card.tool_call_id);
+      setCard(null);
+      setLocked(false);
+      setMessages((m) => [
+        ...m,
+        { id: uid(), role: "assistant", text: res.reply, status: "complete" },
       ]);
     } catch (e) {
       setNotice(e instanceof Error ? e.message : "Undo nahi hua.");
     } finally {
       setUndoBusy(false);
     }
-  }, []);
+  }, [card]);
 
   const recording = ptt.status === "recording";
   const canSend = input.trim() && !busy && !locked;
@@ -329,11 +299,12 @@ export function ConversationScreen({ mode }: { mode: Mode }) {
               card={card}
               busy={busy}
               onConfirm={confirmAction}
-              onCancel={() => {
-                setCard(null);
-                proposalRef.current = null;
-              }}
-              onUndo={card.status === "recorded" ? undoAction : undefined}
+              onCancel={rejectAction}
+              onUndo={
+                card.status === "recorded" && card.undoable
+                  ? undoAction
+                  : undefined
+              }
               undoBusy={undoBusy}
             />
           </div>

@@ -14,7 +14,7 @@ This is a **separate note from `docs/HANDOFF.md`**, which belongs to the TEXT/VO
 DukanYar = voice-first, multimodal Urdu AI assistant for small Pakistani retail
 shopkeepers. Alibaba Cloud AI Hackathon 2026 (one week).
 
-- **Stack:** Next.js (frontend, Vercel later) + FastAPI (backend, `uv`, Render later) + Supabase (hosted Postgres + Auth + RLS).
+- **Stack:** Next.js + FastAPI (`uv`) + Supabase (hosted Postgres + Auth + RLS). The original split-host note is superseded by the Vercel Services deployment guide.
 - EXP and KHATA are **Phase 3** feature epics — they normally sit on top of the
   **TOOL epic (Phase 2)** which is *not built yet*.
 
